@@ -1,4 +1,4 @@
-﻿using System;
+using System.IO.Pipelines;
 using Link.Pools;
 using Link.IO;
 using Link.Modules;
@@ -10,22 +10,23 @@ namespace Link.Net
         public Connector Connector { get; private set; }
 
         public ClientSession(string server,
+            PipeReader pipeReader,
             IPool<DataStream> dataStreamPool = null, 
-            PacketReader packetReader = null, 
             PacketWriter packetWriter = null,
-            PacketPolicy packetPolicy = null) : base(dataStreamPool, packetReader, packetWriter, packetPolicy)
+            PacketPolicy packetPolicy = null) : base(pipeReader, dataStreamPool, packetWriter, packetPolicy)
         {
             Initialize(new TcpSocketOpener(server));
         }
 
         public ClientSession(IPassiveConnectionFactory factory,
+            PipeReader pipeReader,
             IPool<DataStream> dataStreamPool = null, 
-            PacketReader packetReader = null, 
             PacketWriter packetWriter = null,
-            PacketPolicy packetPolicy = null) : base(dataStreamPool, packetReader, packetWriter, packetPolicy)
+            PacketPolicy packetPolicy = null) : base(pipeReader, dataStreamPool, packetWriter, packetPolicy)
         {
             Initialize(factory);
         }
+
         private void Initialize(IPassiveConnectionFactory factory)
         {
             Connector = Modules.Register<Connector>();
@@ -36,10 +37,10 @@ namespace Link.Net
         {
             Connector.Connect();
         }
+
         public override void Close()
         {
             Connector.Close();
         }
     }
 }
-

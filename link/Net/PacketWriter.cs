@@ -1,70 +1,58 @@
-﻿using System;
+using System;
 using Link.IO;
-using Link.Pools;
 
 namespace Link.Net
 {
-    public class PacketWriter
+    public class PacketWriter : IDisposable
     {
-        private DataStream networkStream;
-        private DataStream packetStream;
+        private readonly DataStream _networkStream;
+        private readonly DataStream _packetStream;
+        private bool _disposed;
 
-        public DataStream NetworkStream
-        {
-            get
-            {
-                return networkStream;
-            }
-        }
-        public DataStream PacketStream
-        {
-            get
-            {
-                return packetStream;
-            }
-        }
+        public DataStream NetworkStream => _networkStream;
+        public DataStream PacketStream => _packetStream;
 
-        public PacketWriter(DataStream networkStream = null, DataStream packetStream = null)
+        public PacketWriter()
         {
-            if (networkStream == null)
-            {
-                networkStream = DataStreamPool.Instance.Take();
-            }
-            if (packetStream == null)
-            {
-                packetStream = DataStreamPool.Instance.Take();
-            }
-
-            this.networkStream = networkStream;
-            this.packetStream = packetStream;
+            _networkStream = new DataStream();
+            _packetStream = new DataStream();
         }
 
         public void Clear()
         {
-            networkStream.Clear();
+            _networkStream.Clear();
         }
 
         public void Write(uint packetId, IDataSerializer packet)
         {
-            packetStream.Clear();
-            packetStream.Write(packet);
-            Write(packetId, packetStream);
-        }
-        public void Write(Packet packet)
-        {
-            Write(packet.Id, packet.Stream);
-        }
-        public void Write(uint packetId, DataStream packetStream)
-        {
-            networkStream.WriteCompactUInt32(packetId);
-            networkStream.WriteCompactUInt32(packetStream.Count);
-            networkStream.PushBack(packetStream.Buffer, 0, packetStream.Count);
+            _packetStream.Clear();
+            packet.Serialize(_packetStream);
+            Write(packetId, _packetStream.Span);
         }
 
-        public ArraySegment<byte> GetBuffer()
+        public void Write(Packet packet)
         {
-            return new ArraySegment<byte>(networkStream.Buffer, 0, networkStream.Count);
+            Write(packet.Id, packet.Stream.Span);
+        }
+
+        public void Write(uint packetId, ReadOnlySpan<byte> packetContent)
+        {
+            _networkStream.WriteCompactUInt32(packetId);
+            _networkStream.WriteCompactUInt32((uint)packetContent.Length);
+            _networkStream.Write(packetContent);
+        }
+
+        public ReadOnlySpan<byte> GetBuffer()
+        {
+            return _networkStream.Span;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _networkStream.Dispose();
+            _packetStream.Dispose();
+            _disposed = true;
         }
     }
 }
-

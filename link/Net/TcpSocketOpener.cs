@@ -1,15 +1,11 @@
-﻿using System;
-using System.Net;
 using System.Net.Sockets;
-using Link.Pools;
+using System.Threading.Tasks;
 
 namespace Link.Net
 {
     public class TcpSocketOpener : IPassiveConnectionFactory
     {
         public ServerInfo ServerInfo { get; set; }
-        public IPool<SocketAsyncEventArgs> SocketAsyncEventArgsReceivePool { get; set; }
-        public IPool<SocketAsyncEventArgs> SocketAsyncEventArgsSendPool { get; set; }
 
         public TcpSocketOpener() : this(ServerInfo.Local)
         {
@@ -20,27 +16,33 @@ namespace Link.Net
         public TcpSocketOpener(string host, int port) : this(new ServerInfo(host, port))
         {
         }
-        public TcpSocketOpener(string name, string host, int port) : this(new ServerInfo(host, port, name))
+        public TcpSocketOpener(string name, string host, int port) : this(new ServerInfo(name, host, port))
         {
         }
         public TcpSocketOpener(ServerInfo serverInfo)
         {
             ServerInfo = serverInfo;
-
-            SocketAsyncEventArgsReceivePool = SocketAsyncEventArgsPool.ReceiveInstance;
-            SocketAsyncEventArgsSendPool = SocketAsyncEventArgsPool.SendInstance;
         }
 
-        public Connection Take()
+        public async Task<Connection> TakeAsync()
         {
             var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            socket.Connect(ServerInfo.Host, ServerInfo.Port);
+            await socket.ConnectAsync(ServerInfo.Host, ServerInfo.Port);
             return new SocketConnection(socket);
         }
+
+        // The interface requires a synchronous Take method. This is a compromise.
+        // The ideal solution would be to make the interface async.
+        public Connection Take()
+        {
+            // This is a blocking call and should be avoided.
+            // It's implemented to satisfy the interface requirement.
+            return TakeAsync().GetAwaiter().GetResult();
+        }
+
         public void Free(Connection connection)
         {
             connection?.Close();
         }
     }
 }
-

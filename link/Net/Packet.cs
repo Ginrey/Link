@@ -1,65 +1,57 @@
-﻿using System;
+using System;
 using Link.IO;
 
 namespace Link.Net
 {
-    public class Packet
+    public class Packet : IDisposable
     {
-        public UInt32 Id { get; private set; }
-        public DataStream Stream { get; private set; }
-        
-        public Packet(UInt32 id, DataStream stream)
+        public uint Id { get; }
+        public DataStream Stream { get; }
+        private bool _disposed;
+
+        public Packet(uint id, DataStream stream)
         {
             Id = id;
             Stream = stream;
         }
 
-        public static Packet Create(uint id, DataStream stream)
-        {
-            return new Packet(id, stream);
-        }
         public static Packet Create(uint id, IDataSerializer packet)
         {
-            var result = new Packet(id, Pools.DataStreamPool.Instance.Take());
-            result.WritePacket(packet);
-            return result;
+            var stream = new DataStream();
+            stream.Write(packet);
+            return new Packet(id, stream);
         }
 
-        public virtual T ReadPacket<T>() where T : IDataSerializer
+        public T Read<T>() where T : IDataSerializer, new()
         {
-            Stream.Reset();
-            T result;
-            TryReadPacket(out result);
-            return result;
-        }
-        public virtual bool TryReadPacket<T>(out T result) where T : IDataSerializer
-        {
-            Stream.Reset();
-            return Stream.TryRead(out result);
-        }
-        public virtual bool TryReadPacket(IDataSerializer packet)
-        {
-            Stream.Reset();
-            return Stream.TryRead(packet);
-        }
-        public Packet WritePacket(IDataSerializer packet, bool saveUnread = false)
-        {
-            if (!saveUnread)
+            Stream.Position = 0;
+            var obj = new T();
+            if (!obj.TryDeserialize(Stream))
             {
-                Stream.Clear();
-                Stream.Write(packet);
+                throw new InvalidOperationException("Failed to deserialize packet content.");
             }
-            else
-            {
-                Stream.Flush();
-                var count = Stream.Count;
-                Stream.Write(packet);
-                Stream.PushBack(Stream.Buffer, 0, count);
-                Stream.Position = count;
-                Stream.Flush();
-            }
+            return obj;
+        }
+
+        public bool TryRead<T>(out T result) where T : IDataSerializer, new()
+        {
+            Stream.Position = 0;
+            result = new T();
+            return result.TryDeserialize(Stream);
+        }
+
+        public Packet Write(IDataSerializer packet)
+        {
+            Stream.Clear();
+            packet.Serialize(Stream);
             return this;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            Stream.Dispose();
+            _disposed = true;
         }
     }
 }
-

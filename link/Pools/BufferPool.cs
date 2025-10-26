@@ -1,22 +1,26 @@
-﻿using System;
+using System;
 using System.Threading;
 
 namespace Link.Pools
 {
     public class BufferPool : StackPool<ArraySegment<byte>>
     {
-        const int HeaderSize = 8;
+        private const int HeaderSize = 8; // sizeof(int) * 2
+        private const int CountOffset = 0;
+        private const int IdOffset = 4;
 
-        private static int idCounter = 1;
-        private readonly int Id;
+        private static int _idCounter = 1;
+        private readonly int _id;
 
-        public int DefaultSize { get; private set; }
-        public bool FixedSize { get; private set; }
-        public BufferPool(int defaultSize, bool fixedSize = false, int maxFreeCount = 1024, int allocateDefaultCount = 16) : base(maxFreeCount, allocateDefaultCount)
+        public int DefaultSize { get; }
+        public bool FixedSize { get; }
+
+        public BufferPool(int defaultSize, bool fixedSize = false, int maxFreeCount = 1024, int allocateDefaultCount = 16)
+            : base(maxFreeCount, allocateDefaultCount)
         {
             DefaultSize = defaultSize;
             FixedSize = fixedSize;
-            Id = Interlocked.Increment(ref idCounter);
+            _id = Interlocked.Increment(ref _idCounter);
         }
 
         public override ArraySegment<byte> Create()
@@ -28,112 +32,104 @@ namespace Link.Pools
             return new ArraySegment<byte>(new byte[DefaultSize]);
         }
 
-        private unsafe bool Validate(byte[] buffer)
+        private bool Validate(byte[] buffer)
         {
-            fixed (byte* bytePtr = buffer)
-            {
-                int* ptr = (int*)bytePtr;
-                int id = ptr[1];
+            if (buffer.Length < HeaderSize) return false;
 
-                if (id != Id)
-                {
-                    int count = ptr[0];
-                    if (count == 0)
-                    {
-                        ptr[1] = id = Id;
-                    }
-                }
-                return id == Id;
-            }
-        }
-        private unsafe int Change(byte[] buffer, int value)
-        {
-            fixed (byte* bytePtr = buffer)
+            int id = BitConverter.ToInt32(buffer, IdOffset);
+            if (id != _id)
             {
-                int* ptr = (int*)bytePtr;
-                ptr[0] += value;
-                return ptr[0];
+                int count = BitConverter.ToInt32(buffer, CountOffset);
+                if (count == 0) // First time this buffer is seen by this pool
+                {
+                    BitConverter.GetBytes(_id).CopyTo(buffer, IdOffset);
+                    id = _id;
+                }
             }
+            return id == _id;
+        }
+
+        private int Change(byte[] buffer, int value)
+        {
+            if (buffer.Length < HeaderSize) return 0;
+
+            int currentCount = BitConverter.ToInt32(buffer, CountOffset);
+            int newCount = currentCount + value;
+            BitConverter.GetBytes(newCount).CopyTo(buffer, CountOffset);
+            return newCount;
         }
 
         public override ArraySegment<byte> Take()
         {
-            lock (base.LockObject)
+            lock (LockObject)
             {
                 var result = base.Take();
-                Change(result.Array, -1);
-
+                if (result.Array != null)
+                {
+                    Change(result.Array, -1);
+                }
                 return result;
             }
         }
-        public new bool Return(ArraySegment<byte> element)
+
+        public bool Return(ArraySegment<byte> element)
         {
             return Return(element.Array, element.Offset, element.Count);
         }
+
         public virtual bool Return(byte[] buffer, int offset, int count)
         {
-            if (DefaultSize <= 0)
-                return false;
-            if (buffer.Length <= HeaderSize)
+            if (buffer == null || DefaultSize <= 0 || buffer.Length < HeaderSize)
             {
                 return false;
             }
+
             if (offset < HeaderSize)
             {
-                count = count - HeaderSize + offset;
+                count = count - (HeaderSize - offset);
                 offset = HeaderSize;
             }
+
             if (count < DefaultSize)
             {
                 return false;
             }
+
             if (!Validate(buffer))
             {
                 return false;
             }
-            var ok = false;
-            lock (base.LockObject)
+
+            bool returnedSuccessfully = false;
+            lock (LockObject)
             {
-                var needReturn = base.FreeItems.Count < base.MaxFreeCount;
-                if (!needReturn)
+                if (FreeItems.Count < MaxFreeCount || Change(buffer, 0) > 0)
                 {
-                    int cnt = Change(buffer, 0);
-                    if (cnt > 0)
+                    int returnedCount = 0;
+                    for (int i = 0; i < count; i += DefaultSize)
                     {
-                        needReturn = true;
-                    }
-                }
-                if (needReturn)
-                {
-                    int resCount = 0;
-                    for (var i = 0; i < count; i += DefaultSize)
-                    {
-                        var curOffset = offset + i;
-                        var curCount = DefaultSize;
-                        if (!FixedSize && i + (DefaultSize << 1) > count)
+                        int currentOffset = offset + i;
+                        int currentCount = FixedSize ? DefaultSize : Math.Min(DefaultSize, count - i);
+
+                        if (currentOffset + currentCount > buffer.Length) break;
+
+                        if (base.Return(new ArraySegment<byte>(buffer, currentOffset, currentCount), true))
                         {
-                            curCount = count - i;
-                        }
-                        if (curCount > count - i)
-                        {
-                            break;
-                        }
-                        if (base.Return(new ArraySegment<byte>(buffer, curOffset, curCount), true))
-                        {
-                            resCount++;
-                            ok = true;
+                            returnedCount++;
+                            returnedSuccessfully = true;
                         }
                     }
-                    Change(buffer, resCount);
+                    Change(buffer, returnedCount);
                 }
             }
-            return ok;
+            return returnedSuccessfully;
         }
+
         public override void Allocate(int count)
         {
+            if (count <= 0) return;
             var buffer = new byte[HeaderSize + count * DefaultSize];
             Return(buffer, 0, buffer.Length);
         }
     }
 }
-
