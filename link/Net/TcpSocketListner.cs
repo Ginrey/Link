@@ -1,19 +1,20 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Net;
 using System.Net.Sockets;
-using Link.Pools;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
+using Link.Pools;
 
 namespace Link.Net
 {
     public class TcpSocketListner : IActiveConnectionFactory
     {
-        public event ConnectionEventHandler ConnectionAccept;
+        public event ConnectionEventHandler? ConnectionAccept;
 
-        protected object startLock = new object();
+        protected readonly object startLock = new object();
 
         public int BackLog { get; set; }
 
@@ -23,7 +24,7 @@ namespace Link.Net
         public IPEndPoint LocalEndPoint { get; private set; }
 
         public bool Started { get; private set; }
-        public Socket BaseSocket { get; private set; }
+        public Socket? BaseSocket { get; private set; }
         public TcpSocketListner(IPEndPoint endPoint, int backLog = 32)
         {
             BackLog = backLog;
@@ -78,7 +79,8 @@ namespace Link.Net
             }
             try
             {
-                skt.AcceptAsync().ContinueWith(EndAccept, skt);
+                // Используем более современный асинхронный подход
+                _ = AcceptLoopAsync(skt);
             }
             catch
             {
@@ -90,10 +92,46 @@ namespace Link.Net
                 Stop();
             }
         }
-        protected virtual void EndAccept(Task<Socket> task, object state)
+
+        /// <summary>
+        /// Асинхронный цикл принятия соединений (современный подход).
+        /// </summary>
+        protected virtual async Task AcceptLoopAsync(Socket skt)
+        {
+            while (Started && object.ReferenceEquals(skt, BaseSocket))
+            {
+                try
+                {
+                    var client = await skt.AcceptAsync().ConfigureAwait(false);
+                    
+                    if (!Started || !object.ReferenceEquals(skt, BaseSocket))
+                    {
+                        DisposeSocket(client);
+                        break;
+                    }
+
+                    var socketConnection = new SocketConnection(
+                        client,
+                        SocketAsyncEventArgsReceivePool,
+                        SocketAsyncEventArgsSendPool);
+                    ConnectionAccept?.Invoke(this, new ConnectionEventArgs(socketConnection));
+                }
+                catch
+                {
+                    if (!Started || !object.ReferenceEquals(skt, BaseSocket))
+                    {
+                        DisposeSocket(skt);
+                        break;
+                    }
+                }
+            }
+        }
+
+        [Obsolete("Use AcceptLoopAsync instead")]
+        protected virtual void EndAccept(Task<Socket> task, object? state)
         {
             var skt = state as Socket;
-            Socket client = null;
+            Socket? client = null;
             try
             {
                 if (task.IsCompleted && !task.IsCanceled && !task.IsFaulted)
@@ -113,7 +151,8 @@ namespace Link.Net
                 DisposeSocket(skt);
                 return;
             }
-            BeginAccept(skt);
+            if (skt != null)
+                BeginAccept(skt);
 
             if (client != null)
             {
@@ -124,7 +163,7 @@ namespace Link.Net
                 ConnectionAccept?.Invoke(this, new ConnectionEventArgs(socketConnection));
             }
         }
-        protected static void DisposeSocket(Socket skt)
+        protected static void DisposeSocket(Socket? skt)
         {
             if (skt == null) return;
             try

@@ -1,11 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Net;
 using System.Net.Sockets;
-using System.IO;
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Link.IO;
 using Link.Pools;
 
@@ -14,8 +15,8 @@ namespace Link.Net
     public class SocketConnection : Connection
     {
         public Socket BaseSocket { get; private set; }
-        public SocketAsyncEventArgs SocketReceiveArgs { get; private set; }
-        public SocketAsyncEventArgs SocketSendArgs { get; private set; }
+        public SocketAsyncEventArgs? SocketReceiveArgs { get; private set; }
+        public SocketAsyncEventArgs? SocketSendArgs { get; private set; }
 
         private IPool<SocketAsyncEventArgs> ReceivePool { get; }
         private IPool<SocketAsyncEventArgs> SendPool { get; }
@@ -46,7 +47,7 @@ namespace Link.Net
         {
         }
 
-        private object lckObject = new object();
+        private readonly object lckObject = new object();
 
         public override void Start()
         {
@@ -97,6 +98,60 @@ namespace Link.Net
             return StartSend(buffer, offset, length);
         }
 
+        /// <summary>
+        /// Асинхронная отправка данных с использованием ValueTask.
+        /// </summary>
+        public override async ValueTask<bool> SendAsync(byte[] buffer, int offset, int length, CancellationToken cancellationToken = default)
+        {
+            if (State != ConnectionState.Working)
+            {
+                return false;
+            }
+
+            try
+            {
+                var sent = await BaseSocket.SendAsync(new ReadOnlyMemory<byte>(buffer, offset, length), SocketFlags.None, cancellationToken).ConfigureAwait(false);
+                if (sent == 0)
+                {
+                    Close();
+                    return false;
+                }
+                return State != ConnectionState.Closed;
+            }
+            catch
+            {
+                Close();
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Асинхронная отправка данных с использованием ReadOnlyMemory.
+        /// </summary>
+        public override async ValueTask<bool> SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
+        {
+            if (State != ConnectionState.Working)
+            {
+                return false;
+            }
+
+            try
+            {
+                var sent = await BaseSocket.SendAsync(data, SocketFlags.None, cancellationToken).ConfigureAwait(false);
+                if (sent == 0)
+                {
+                    Close();
+                    return false;
+                }
+                return State != ConnectionState.Closed;
+            }
+            catch
+            {
+                Close();
+                return false;
+            }
+        }
+
         private void StartReceive()
         {
             if (State != ConnectionState.Working)
@@ -115,25 +170,21 @@ namespace Link.Net
                 Close();
             }
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool StartSend(byte[] buffer, int offset, int count)
         {
             if (State != ConnectionState.Working)
             {
                 return false;
             }
-            //SocketSendArgs.SetBuffer(buffer, offset, count); // CHECK SendPool.Free if change
             try
             {
-                var len = BaseSocket.Send(buffer, offset, count, SocketFlags.None, out SocketError errorCode);
+                var len = BaseSocket.Send(buffer.AsSpan(offset, count), SocketFlags.None, out SocketError errorCode);
                 if (len == 0 || errorCode != SocketError.Success)
                 {
                     Close();
                 }
-                /*
-                if (!BaseSocket.SendAsync(SocketSendArgs))
-                {
-                    SendProcess(SocketSendArgs);
-                }*/
                 return State != ConnectionState.Closed;
             }
             catch
@@ -142,14 +193,15 @@ namespace Link.Net
                 return false;
             }
         }
-        private void socketArgsRecv_Completed(object sender, SocketAsyncEventArgs e)
+        private void socketArgsRecv_Completed(object? sender, SocketAsyncEventArgs e)
         {
             ReceiveProcess(e);
         }
-        private void socketArgsSend_Completed(object sender, SocketAsyncEventArgs e)
+        private void socketArgsSend_Completed(object? sender, SocketAsyncEventArgs e)
         {
             SendProcess(e);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void ReceiveProcess(SocketAsyncEventArgs socketArgs)
         {
             try
@@ -170,9 +222,10 @@ namespace Link.Net
             try
             {
 #endif
-            if (State != ConnectionState.Closed)
+            if (State != ConnectionState.Closed && socketArgs.Buffer != null)
             {
-                ProcessReceive(socketArgs.Buffer, socketArgs.Offset, socketArgs.BytesTransferred);
+                // Используем Span для оптимизации
+                ProcessReceive(socketArgs.Buffer.AsSpan(socketArgs.Offset, socketArgs.BytesTransferred));
             }
             StartReceive();
 #if !DEBUG
