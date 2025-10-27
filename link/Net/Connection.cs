@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Link.Security;
 
@@ -10,6 +11,31 @@ public abstract class Connection
 {
     public event EventHandler? StateChanged;
     public event ReceivedDataHandler? DataReceived;
+
+    // Modern async alternatives to events using Channels
+    private readonly Channel<ConnectionState> _stateChangedChannel = Channel.CreateUnbounded<ConnectionState>(new UnboundedChannelOptions 
+    { 
+        SingleReader = false, 
+        SingleWriter = false 
+    });
+    
+    private readonly Channel<(byte[] buffer, int offset, int length)> _dataReceivedChannel = Channel.CreateUnbounded<(byte[], int, int)>(new UnboundedChannelOptions 
+    { 
+        SingleReader = false, 
+        SingleWriter = false 
+    });
+
+    /// <summary>
+    /// Асинхронная альтернатива событию StateChanged.
+    /// Подписчики могут читать из этого канала для получения уведомлений о смене состояния.
+    /// </summary>
+    public ChannelReader<ConnectionState> StateChangedChannel => _stateChangedChannel.Reader;
+
+    /// <summary>
+    /// Асинхронная альтернатива событию DataReceived.
+    /// Подписчики могут читать из этого канала для получения данных.
+    /// </summary>
+    public ChannelReader<(byte[] buffer, int offset, int length)> DataReceivedChannel => _dataReceivedChannel.Reader;
 
     public EncodeStack EncodeStack { get; private set; }
     public EncodeStack DecodeStack { get; private set; }
@@ -36,7 +62,9 @@ public abstract class Connection
         protected set
         {
             state = value;
+            // Поддерживаем оба подхода: events и channels
             StateChanged?.Invoke(this, EventArgs.Empty);
+            _ = _stateChangedChannel.Writer.TryWrite(value);
         }
     }
 
@@ -51,10 +79,8 @@ public abstract class Connection
         {
             Encoder.Reset();
             Encoder.Encode(buffer, offset, length);
-            return ProcessSend(
-                Encoder.OutputStream.Buffer, 
-                Encoder.OutputStream.Position, 
-                Encoder.OutputStream.Count - Encoder.OutputStream.Position);
+            var memory = Encoder.OutputStream.AsMemory();
+            return ProcessSendAsync(memory).GetAwaiter().GetResult();
         }
         finally
         {
@@ -63,7 +89,7 @@ public abstract class Connection
     }
 
     /// <summary>
-    /// Асинхронная отправка данных с использованием Span.
+    /// Синхронная отправка данных с использованием Span.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual bool Send(ReadOnlySpan<byte> data)
@@ -74,10 +100,8 @@ public abstract class Connection
             Encoder.Reset();
             Encoder.OutputStream.Clear();
             Encoder.OutputStream.PushBack(data);
-            return ProcessSend(
-                Encoder.OutputStream.Buffer, 
-                Encoder.OutputStream.Position, 
-                Encoder.OutputStream.Count - Encoder.OutputStream.Position);
+            var memory = Encoder.OutputStream.AsMemory();
+            return ProcessSendAsync(memory).GetAwaiter().GetResult();
         }
         finally
         {
@@ -95,10 +119,8 @@ public abstract class Connection
         {
             Encoder.Reset();
             Encoder.Encode(buffer, offset, length);
-            return ProcessSend(
-                Encoder.OutputStream.Buffer, 
-                Encoder.OutputStream.Position, 
-                Encoder.OutputStream.Count - Encoder.OutputStream.Position);
+            var memory = Encoder.OutputStream.AsMemory();
+            return await ProcessSendAsync(memory, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -117,10 +139,8 @@ public abstract class Connection
             Encoder.Reset();
             Encoder.OutputStream.Clear();
             Encoder.OutputStream.PushBack(data.Span);
-            return ProcessSend(
-                Encoder.OutputStream.Buffer, 
-                Encoder.OutputStream.Position, 
-                Encoder.OutputStream.Count - Encoder.OutputStream.Position);
+            var memory = Encoder.OutputStream.AsMemory();
+            return await ProcessSendAsync(memory, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -128,7 +148,22 @@ public abstract class Connection
         }
     }
 
-    protected abstract bool ProcessSend(byte[] buffer, int offset, int length);
+    /// <summary>
+    /// Асинхронный метод отправки данных через ReadOnlyMemory (для переопределения в наследниках).
+    /// Заменяет старый синхронный ProcessSend(byte[], int, int).
+    /// Использует ReadOnlyMemory вместо Span для поддержки async.
+    /// </summary>
+    protected abstract ValueTask<bool> ProcessSendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Устаревший синхронный метод для обратной совместимости.
+    /// Новый код должен использовать ProcessSendAsync.
+    /// </summary>
+    [Obsolete("Use ProcessSendAsync instead for better async performance")]
+    protected virtual bool ProcessSend(byte[] buffer, int offset, int length)
+    {
+        return ProcessSendAsync(new ReadOnlyMemory<byte>(buffer, offset, length)).GetAwaiter().GetResult();
+    }
         
     protected virtual void ProcessReceive(byte[] buffer, int offset, int length)
     {
@@ -137,10 +172,13 @@ public abstract class Connection
         {
             Decoder.Reset();
             Decoder.Encode(buffer, offset, length);
-            DataReceived?.Invoke(this, 
-                Decoder.OutputStream.Buffer, 
-                Decoder.OutputStream.Position, 
-                Decoder.OutputStream.Count - Decoder.OutputStream.Position);
+            var resultBuffer = Decoder.OutputStream.Buffer;
+            var resultOffset = Decoder.OutputStream.Position;
+            var resultLength = Decoder.OutputStream.Count - Decoder.OutputStream.Position;
+            
+            // Поддерживаем оба подхода: события и каналы
+            DataReceived?.Invoke(this, resultBuffer, resultOffset, resultLength);
+            _ = _dataReceivedChannel.Writer.TryWrite((resultBuffer, resultOffset, resultLength));
         }
         finally
         {
@@ -160,10 +198,39 @@ public abstract class Connection
             Decoder.Reset();
             Decoder.OutputStream.Clear();
             Decoder.OutputStream.PushBack(data);
-            DataReceived?.Invoke(this, 
-                Decoder.OutputStream.Buffer, 
-                Decoder.OutputStream.Position, 
-                Decoder.OutputStream.Count - Decoder.OutputStream.Position);
+            var resultBuffer = Decoder.OutputStream.Buffer;
+            var resultOffset = Decoder.OutputStream.Position;
+            var resultLength = Decoder.OutputStream.Count - Decoder.OutputStream.Position;
+            
+            // Поддерживаем оба подхода: события и каналы
+            DataReceived?.Invoke(this, resultBuffer, resultOffset, resultLength);
+            _ = _dataReceivedChannel.Writer.TryWrite((resultBuffer, resultOffset, resultLength));
+        }
+        finally
+        {
+            _decodeSemaphore.Release();
+        }
+    }
+
+    /// <summary>
+    /// Асинхронная обработка получения данных.
+    /// Используйте DataReceivedChannel для чтения данных в асинхронном коде.
+    /// </summary>
+    protected virtual async ValueTask ProcessReceiveAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
+    {
+        await _decodeSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            Decoder.Reset();
+            Decoder.OutputStream.Clear();
+            Decoder.OutputStream.PushBack(data.Span);
+            var resultBuffer = Decoder.OutputStream.Buffer;
+            var resultOffset = Decoder.OutputStream.Position;
+            var resultLength = Decoder.OutputStream.Count - Decoder.OutputStream.Position;
+            
+            // Поддерживаем оба подхода: события и каналы
+            DataReceived?.Invoke(this, resultBuffer, resultOffset, resultLength);
+            await _dataReceivedChannel.Writer.WriteAsync((resultBuffer, resultOffset, resultLength), cancellationToken).ConfigureAwait(false);
         }
         finally
         {

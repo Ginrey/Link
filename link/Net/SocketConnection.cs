@@ -120,9 +120,38 @@ public class SocketConnection : Connection
             _stateSemaphore.Release();
         }
     }
+
+    [Obsolete("Use ProcessSendAsync instead")]
     protected override bool ProcessSend(byte[] buffer, int offset, int length)
     {
         return StartSend(buffer, offset, length);
+    }
+
+    /// <summary>
+    /// Современная асинхронная реализация отправки данных через ReadOnlyMemory.
+    /// </summary>
+    protected override async ValueTask<bool> ProcessSendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
+    {
+        if (State != ConnectionState.Working)
+        {
+            return false;
+        }
+
+        try
+        {
+            var sent = await BaseSocket.SendAsync(data, SocketFlags.None, cancellationToken).ConfigureAwait(false);
+            if (sent == 0)
+            {
+                Close();
+                return false;
+            }
+            return State != ConnectionState.Closed;
+        }
+        catch
+        {
+            Close();
+            return false;
+        }
     }
 
     /// <summary>
