@@ -1,8 +1,6 @@
-﻿using System;
-namespace Link.Net
+﻿namespace Link.Net;
+
+public interface IConnectionConfigurator
 {
-    public interface IConnectionConfigurator
-    {
-        void Configure(Connection connection);
-    }
+    void Configure(Connection connection);
 }

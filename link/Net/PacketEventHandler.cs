@@ -1,7 +1,3 @@
-﻿using System;
+﻿namespace Link.Net;
 
-namespace Link.Net
-{
-    public delegate void PacketEventHandler(object sender, PacketEventArgs e);
-}
-
+public delegate void PacketEventHandler(object sender, PacketEventArgs e);

@@ -1,12 +1,8 @@
-﻿using System;
+﻿namespace Link.Net;
 
-namespace Link.Net
+public enum PacketPolicyState
 {
-    public enum PacketPolicyState
-    {
-        Accept = 0,
-        Reject = 1,
-        Drop = 2
-    }
+    Accept = 0,
+    Reject = 1,
+    Drop = 2
 }
-

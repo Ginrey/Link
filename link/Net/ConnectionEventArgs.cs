@@ -1,18 +1,11 @@
-﻿using System;
+﻿namespace Link.Net;
 
-namespace Link.Net
+public class ConnectionEventArgs
 {
-    public class ConnectionEventArgs
+    public Connection Connection { get; private set; }
+
+    public ConnectionEventArgs(Connection connection)
     {
-        public Connection Connection { get; private set; }
-        public ConnectionEventArgs()
-        {
-            
-        }
-        public ConnectionEventArgs(Connection connection)
-        {
-            this.Connection = connection;
-        }
+        Connection = connection;
     }
 }
-

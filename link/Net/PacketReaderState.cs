@@ -1,13 +1,9 @@
-﻿using System;
+﻿namespace Link.Net;
 
-namespace Link.Net
+public enum PacketReaderState
 {
-    public enum PacketReaderState
-    {
-        WaitingId = 0,
-        WaitingLength = 1,
-        WaitingContent = 2, 
-        Complete = 3
-    }
+    WaitingId = 0,
+    WaitingLength = 1,
+    WaitingContent = 2, 
+    Complete = 3
 }
-

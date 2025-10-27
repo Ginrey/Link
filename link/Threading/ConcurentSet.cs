@@ -2,211 +2,208 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 
-namespace Link.Threading
+namespace Link.Threading;
+
+public class ConcurentSet<T> : ISet<T>, IEnumerable<T>
 {
-    public class ConcurentSet<T> : ISet<T>, IEnumerable<T>
+    private static readonly T[] emptyData = { };
+
+    private HashSet<T> Set;
+    private T[] safeCached;
+
+    public ConcurentSet()
     {
-        private static readonly T[] emptyData = { };
+        Set = new HashSet<T>();
+    }
 
-        private object LockObject = new object();
-        private HashSet<T> Set;
-        private T[] safeCached;
+    public object Lock { get; } = new();
 
-        public ConcurentSet()
-        {
-            Set = new HashSet<T>();
-        }
-
-        public object Lock => LockObject;
-
-        public int Count
-        {
-            get
-            {
-                lock (Lock)
-                {
-                    return Set.Count;
-                }
-            }
-        }
-
-        public bool IsReadOnly => false;
-
-        public IEnumerable<T> Items
-        {
-            get
-            {
-                var items = ToArray();
-                foreach (var x in items)
-                {
-                    yield return x;
-                }
-            }
-        }
-        public IEnumerable<T> ItemsUnsafe
-        {
-            get
-            {
-                foreach (var x in Set)
-                {
-                    yield return x;
-                }
-            }
-        }
-        public T[] ToArray()
-        {
-            T[] result;
-            lock (Lock)
-            {
-                if (safeCached == null)
-                {
-                    safeCached = Set.ToArray();
-                }
-                result = safeCached;
-            }
-            return result;
-        }
-
-        public bool Add(T item)
+    public int Count
+    {
+        get
         {
             lock (Lock)
             {
-                safeCached = null;
-                return Set.Add(item);
+                return Set.Count;
             }
         }
+    }
 
-        public void Clear()
+    public bool IsReadOnly => false;
+
+    public IEnumerable<T> Items
+    {
+        get
         {
-            lock (Lock)
+            var items = ToArray();
+            foreach (var x in items)
             {
-                safeCached = emptyData;
-                Set.Clear();
+                yield return x;
             }
         }
-
-        public bool Contains(T item)
+    }
+    public IEnumerable<T> ItemsUnsafe
+    {
+        get
         {
-            lock (Lock)
+            foreach (var x in Set)
             {
-                return Set.Contains(item);
+                yield return x;
             }
         }
-
-        public void CopyTo(T[] array, int arrayIndex)
+    }
+    public T[] ToArray()
+    {
+        T[] result;
+        lock (Lock)
         {
-            var temp = ToArray();
-            Array.Copy(temp, 0, array, arrayIndex, temp.Length);
-        }
-
-        public void ExceptWith(IEnumerable<T> other)
-        {
-            lock (Lock)
+            if (safeCached == null)
             {
-                safeCached = null;
-                Set.ExceptWith(other);
+                safeCached = Set.ToArray();
             }
+            result = safeCached;
         }
+        return result;
+    }
 
-        public IEnumerator<T> GetEnumerator()
+    public bool Add(T item)
+    {
+        lock (Lock)
         {
-            return Items.GetEnumerator();
+            safeCached = null;
+            return Set.Add(item);
         }
+    }
 
-        public void IntersectWith(IEnumerable<T> other)
+    public void Clear()
+    {
+        lock (Lock)
         {
-            lock (Lock)
-            {
-                safeCached = null;
-                Set.IntersectWith(other);
-            }
+            safeCached = emptyData;
+            Set.Clear();
         }
+    }
 
-        public bool IsProperSubsetOf(IEnumerable<T> other)
+    public bool Contains(T item)
+    {
+        lock (Lock)
         {
-            lock (Lock)
-            {
-                return Set.IsProperSubsetOf(other);
-            }
+            return Set.Contains(item);
         }
+    }
 
-        public bool IsProperSupersetOf(IEnumerable<T> other)
-        {
-            lock (Lock)
-            {
-                return Set.IsProperSupersetOf(other);
-            }
-        }
+    public void CopyTo(T[] array, int arrayIndex)
+    {
+        var temp = ToArray();
+        Array.Copy(temp, 0, array, arrayIndex, temp.Length);
+    }
 
-        public bool IsSubsetOf(IEnumerable<T> other)
+    public void ExceptWith(IEnumerable<T> other)
+    {
+        lock (Lock)
         {
-            lock (Lock)
-            {
-                return Set.IsSubsetOf(other);
-            }
+            safeCached = null;
+            Set.ExceptWith(other);
         }
+    }
 
-        public bool IsSupersetOf(IEnumerable<T> other)
-        {
-            lock (Lock)
-            {
-                return Set.IsSupersetOf(other);
-            }
-        }
+    public IEnumerator<T> GetEnumerator()
+    {
+        return Items.GetEnumerator();
+    }
 
-        public bool Overlaps(IEnumerable<T> other)
+    public void IntersectWith(IEnumerable<T> other)
+    {
+        lock (Lock)
         {
-            lock (Lock)
-            {
-                return Set.Overlaps(other);
-            }
+            safeCached = null;
+            Set.IntersectWith(other);
         }
+    }
 
-        public bool Remove(T item)
+    public bool IsProperSubsetOf(IEnumerable<T> other)
+    {
+        lock (Lock)
         {
-            lock (Lock)
-            {
-                safeCached = null;
-                return Set.Remove(item);
-            }
+            return Set.IsProperSubsetOf(other);
         }
+    }
 
-        public bool SetEquals(IEnumerable<T> other)
+    public bool IsProperSupersetOf(IEnumerable<T> other)
+    {
+        lock (Lock)
         {
-            lock (Lock)
-            {
-                return Set.SetEquals(other);
-            }
+            return Set.IsProperSupersetOf(other);
         }
+    }
 
-        public void SymmetricExceptWith(IEnumerable<T> other)
+    public bool IsSubsetOf(IEnumerable<T> other)
+    {
+        lock (Lock)
         {
-            lock (Lock)
-            {
-                safeCached = null;
-                Set.SymmetricExceptWith(other);
-            }
+            return Set.IsSubsetOf(other);
         }
+    }
 
-        public void UnionWith(IEnumerable<T> other)
+    public bool IsSupersetOf(IEnumerable<T> other)
+    {
+        lock (Lock)
         {
-            lock (Lock)
-            {
-                safeCached = null;
-                Set.UnionWith(other);
-            }
+            return Set.IsSupersetOf(other);
         }
+    }
 
-        void ICollection<T>.Add(T item)
+    public bool Overlaps(IEnumerable<T> other)
+    {
+        lock (Lock)
         {
-            Add(item);
+            return Set.Overlaps(other);
         }
+    }
 
-        IEnumerator IEnumerable.GetEnumerator()
+    public bool Remove(T item)
+    {
+        lock (Lock)
         {
-            return GetEnumerator();
+            safeCached = null;
+            return Set.Remove(item);
         }
+    }
+
+    public bool SetEquals(IEnumerable<T> other)
+    {
+        lock (Lock)
+        {
+            return Set.SetEquals(other);
+        }
+    }
+
+    public void SymmetricExceptWith(IEnumerable<T> other)
+    {
+        lock (Lock)
+        {
+            safeCached = null;
+            Set.SymmetricExceptWith(other);
+        }
+    }
+
+    public void UnionWith(IEnumerable<T> other)
+    {
+        lock (Lock)
+        {
+            safeCached = null;
+            Set.UnionWith(other);
+        }
+    }
+
+    void ICollection<T>.Add(T item)
+    {
+        Add(item);
+    }
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
     }
 }

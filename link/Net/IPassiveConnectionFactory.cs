@@ -1,11 +1,7 @@
-﻿using System;
+﻿namespace Link.Net;
 
-namespace Link.Net
+public interface IPassiveConnectionFactory
 {
-    public interface IPassiveConnectionFactory
-    {
-        Connection Take();
-        void Free(Connection connection);
-    }
+    Connection Take();
+    void Free(Connection connection);
 }
-

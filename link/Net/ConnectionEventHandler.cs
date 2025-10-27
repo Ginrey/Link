@@ -1,7 +1,3 @@
-﻿using System;
+﻿namespace Link.Net;
 
-namespace Link.Net
-{
-    public delegate void ConnectionEventHandler(object sender, ConnectionEventArgs connection);
-}
-
+public delegate void ConnectionEventHandler(object sender, ConnectionEventArgs connection);

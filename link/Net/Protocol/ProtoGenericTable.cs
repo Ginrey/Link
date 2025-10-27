@@ -1,98 +1,92 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using Link.IO;
+﻿using Link.IO;
 
-namespace Link.Net.Protocol
+namespace Link.Net.Protocol;
+
+public class ProtoGenericTable<Proto, Packet> where Proto : ProtoTable where Packet : IDataSerializer
 {
-    public class ProtoGenericTable<Proto, Packet> where Proto : ProtoTable where Packet : IDataSerializer
+    public static IPacketBuilder<Packet> Builder;
+}
+public abstract class ProtoGenericTable<Proto> : ProtoDictionaryTable where Proto : ProtoTable
+{
+    public void Register<TBase, TPacket>(uint packetId, int maxSize = -1) where TPacket : TBase where TBase : IDataSerializer
     {
-        public static IPacketBuilder<Packet> Builder;
+        Register<TBase, TPacket>(new PacketBaseInformation(packetId, maxSize));
     }
-    public abstract class ProtoGenericTable<Proto> : ProtoDictionaryTable where Proto : ProtoTable
+    public void Register<TBase, TPacket>(PacketBaseInformation information) where TPacket : TBase where TBase : IDataSerializer
     {
-        public void Register<TBase, TPacket>(uint packetId, int maxSize = -1) where TPacket : TBase where TBase : IDataSerializer
-        {
-            Register<TBase, TPacket>(new PacketBaseInformation(packetId, maxSize));
-        }
-        public void Register<TBase, TPacket>(PacketBaseInformation information) where TPacket : TBase where TBase : IDataSerializer
-        {
-            var baseBuilder = new PacketBuilder<TBase>();
-            var packetBuilder = new PacketBuilder<TPacket>();
+        var baseBuilder = new PacketBuilder<TBase>();
+        var packetBuilder = new PacketBuilder<TPacket>();
 
-            baseBuilder.Setup(information, () => Helpers.FastConstructor<TPacket>.Create());
-            packetBuilder.Setup(information, Helpers.FastConstructor<TPacket>.Create);
+        baseBuilder.Setup(information, () => Helpers.FastConstructor<TPacket>.Create());
+        packetBuilder.Setup(information, Helpers.FastConstructor<TPacket>.Create);
 
 
-            lock (lockObject)
-            {
-                ProtoGenericTable<Proto, TBase>.Builder = baseBuilder;
-                ProtoGenericTable<Proto, TPacket>.Builder = packetBuilder;
+        lock (lockObject)
+        {
+            ProtoGenericTable<Proto, TBase>.Builder = baseBuilder;
+            ProtoGenericTable<Proto, TPacket>.Builder = packetBuilder;
 
-                TypeTable[typeof(TBase)] = baseBuilder;
-                TypeTable[typeof(TPacket)] = packetBuilder;
-                IdTable[information.Id] = baseBuilder;
-            }
+            TypeTable[typeof(TBase)] = baseBuilder;
+            TypeTable[typeof(TPacket)] = packetBuilder;
+            IdTable[information.Id] = baseBuilder;
         }
-        public void Register<TBase, TStructure>() where TStructure : TBase where TBase : IDataSerializer
-        {
-            var baseBuilder = new PacketBuilder<TBase>();
-            var structureBuilder = new PacketBuilder<TStructure>();
+    }
+    public void Register<TBase, TStructure>() where TStructure : TBase where TBase : IDataSerializer
+    {
+        var baseBuilder = new PacketBuilder<TBase>();
+        var structureBuilder = new PacketBuilder<TStructure>();
 
-            baseBuilder.Setup(() => Helpers.FastConstructor<TStructure>.Create());
-            structureBuilder.Setup(Helpers.FastConstructor<TStructure>.Create);
+        baseBuilder.Setup(() => Helpers.FastConstructor<TStructure>.Create());
+        structureBuilder.Setup(Helpers.FastConstructor<TStructure>.Create);
 
-            lock (lockObject)
-            {
-                ProtoGenericTable<Proto, TBase>.Builder = baseBuilder;
-                ProtoGenericTable<Proto, TStructure>.Builder = structureBuilder;
+        lock (lockObject)
+        {
+            ProtoGenericTable<Proto, TBase>.Builder = baseBuilder;
+            ProtoGenericTable<Proto, TStructure>.Builder = structureBuilder;
 
-                TypeTable[typeof(TBase)] = baseBuilder;
-                TypeTable[typeof(TStructure)] = structureBuilder;
-            }
+            TypeTable[typeof(TBase)] = baseBuilder;
+            TypeTable[typeof(TStructure)] = structureBuilder;
         }
-        public override void Register<T>(IPacketBuilder<T> builder)
+    }
+    public override void Register<T>(IPacketBuilder<T> builder)
+    {
+        if (builder == null)
         {
-            if (builder == null)
-            {
-                return;
-            }
-            ProtoGenericTable<Proto, T>.Builder = builder;
-            Register(typeof(T), builder);
+            return;
         }
+        ProtoGenericTable<Proto, T>.Builder = builder;
+        Register(typeof(T), builder);
+    }
 
-        public override IPacketContainer<Packet> GetContainer<Packet>()
+    public override IPacketContainer<Packet> GetContainer<Packet>()
+    {
+        if (ProtoGenericTable<Proto, Packet>.Builder != null)
         {
-            if (ProtoGenericTable<Proto, Packet>.Builder != null)
-            {
-                return ProtoGenericTable<Proto, Packet>.Builder.CreateContainer();
-            }
-            return null;
+            return ProtoGenericTable<Proto, Packet>.Builder.CreateContainer();
         }
-        public override IPacketBuilder<Packet> GetBuilder<Packet>()
+        return null;
+    }
+    public override IPacketBuilder<Packet> GetBuilder<Packet>()
+    {
+        return ProtoGenericTable<Proto, Packet>.Builder;
+    }
+    public override PacketBaseInformation GetInfo<Packet>()
+    {
+        return ProtoGenericTable<Proto, Packet>.Builder?.Information;
+    }
+    public override PacketBaseInformation GetInfo<Packet>(Packet packet)
+    {
+        if (packet == null)
         {
-            return ProtoGenericTable<Proto, Packet>.Builder;
+            return GetInfo<Packet>();
         }
-        public override PacketBaseInformation GetInfo<Packet>()
+        else
         {
-            return ProtoGenericTable<Proto, Packet>.Builder?.Information;
+            return GetInfo(packet.GetType());
         }
-        public override PacketBaseInformation GetInfo<Packet>(Packet packet)
-        {
-            if (packet == null)
-            {
-                return GetInfo<Packet>();
-            }
-            else
-            {
-                return GetInfo(packet.GetType());
-            }
-        }
-        public override Structure Get<Structure>()
-        {
-            return base.Get<Structure>();
-        }
+    }
+    public override Structure Get<Structure>()
+    {
+        return base.Get<Structure>();
     }
 }

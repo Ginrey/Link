@@ -1,30 +1,19 @@
-﻿using System;
+﻿namespace Link.Net;
 
-namespace Link.Net
+public class PacketPolicy
 {
-    public class PacketPolicy
-    {
-        private static PacketPolicy defaultPolicy = new PacketPolicy();
-        public static PacketPolicy AllAcceptPolicy
-        {
-            get 
-            {
-                return defaultPolicy;
-            }
-        }
+    public static PacketPolicy AllAcceptPolicy { get; } = new();
 
-        public virtual PacketPolicyState CheckId(uint packetId)
-        {
-            return PacketPolicyState.Accept;
-        }
-        public virtual PacketPolicyState CheckLength(uint packetId, uint packetLength)
-        {
-            return PacketPolicyState.Accept;
-        }
-        public virtual PacketPolicyState CheckPacket(Packet packet)
-        {
-            return PacketPolicyState.Accept;
-        }
+    public virtual PacketPolicyState CheckId(uint packetId)
+    {
+        return PacketPolicyState.Accept;
+    }
+    public virtual PacketPolicyState CheckLength(uint packetId, uint packetLength)
+    {
+        return PacketPolicyState.Accept;
+    }
+    public virtual PacketPolicyState CheckPacket(Packet packet)
+    {
+        return PacketPolicyState.Accept;
     }
 }
-

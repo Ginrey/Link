@@ -1,257 +1,240 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Link.IO;
 
-namespace Link.Net.Protocol
+namespace Link.Net.Protocol;
+
+public class ProtoListTable : ProtoTable
 {
-    public class ProtoListTable : ProtoTable
+    private readonly List<ProtoTable> ProtoList = new();
+
+    public object LockObject { get; } = new();
+
+    public int Count => ProtoList.Count;
+
+    public ProtoListTable()
     {
-        private readonly List<ProtoTable> ProtoList = new List<ProtoTable>();
-        
-        private readonly object lockObject = new object();
-        public object LockObject
-        {
-            get
-            {
-                return lockObject;
-            }
-        }
 
-        public int Count
-        {
-            get
-            {
-                return ProtoList.Count;
-            }
-        }
-
-        public ProtoListTable()
-        {
-
-        }
-        public ProtoListTable(ProtoTable proto)
+    }
+    public ProtoListTable(ProtoTable proto)
+    {
+        Register(proto);
+    }
+    public ProtoListTable(params ProtoTable[] protos) : this((IEnumerable<ProtoTable>)protos)
+    {
+    }
+    public ProtoListTable(IEnumerable<ProtoTable> protos)
+    {
+        foreach (var proto in protos)
         {
             Register(proto);
         }
-        public ProtoListTable(params ProtoTable[] protos) : this((IEnumerable<ProtoTable>)protos)
-        {
-        }
-        public ProtoListTable(IEnumerable<ProtoTable> protos)
-        {
-            foreach (var proto in protos)
-            {
-                Register(proto);
-            }
-        }
+    }
 
-        public ProtoTable Register<T>(int index = -1) where T : ProtoTable, new()
+    public ProtoTable Register<T>(int index = -1) where T : ProtoTable, new()
+    {
+        return Register(new T(), index);
+    }
+    public ProtoTable Register(ProtoTable table, int index = -1)
+    {
+        lock (LockObject)
         {
-            return Register(new T(), index);
-        }
-        public ProtoTable Register(ProtoTable table, int index = -1)
-        {
-            lock (lockObject)
-            {
-                if (index < 0) index = Count;
-                if (index > Count) index = Count;
+            if (index < 0) index = Count;
+            if (index > Count) index = Count;
 
-                ProtoList.Insert(index, table);
-                return table;
-            }
+            ProtoList.Insert(index, table);
+            return table;
         }
+    }
         
 
-        public override IPacketContainer<Packet> GetContainer<Packet>()
+    public override IPacketContainer<Packet> GetContainer<Packet>()
+    {
+        lock (LockObject)
         {
-            lock (lockObject)
+            foreach (var x in ProtoList)
             {
-                foreach (var x in ProtoList)
+                var res = x.GetContainer<Packet>();
+                if (res != null)
                 {
-                    var res = x.GetContainer<Packet>();
-                    if (res != null)
-                    {
-                        return res;
-                    }
+                    return res;
                 }
             }
-            return null;
         }
+        return null;
+    }
 
-        public override IPacketContainer GetContainer(Type type)
+    public override IPacketContainer GetContainer(Type type)
+    {
+        lock (LockObject)
         {
-            lock (lockObject)
+            foreach (var x in ProtoList)
             {
-                foreach (var x in ProtoList)
+                var res = x.GetContainer(type);
+                if (res != null)
                 {
-                    var res = x.GetContainer(type);
-                    if (res != null)
-                    {
-                        return res;
-                    }
+                    return res;
                 }
             }
-            return null;
         }
+        return null;
+    }
         
-        public override IPacketContainer GetContainer(uint packetId)
+    public override IPacketContainer GetContainer(uint packetId)
+    {
+        lock (LockObject)
         {
-            lock (lockObject)
+            foreach (var x in ProtoList)
             {
-                foreach (var x in ProtoList)
+                var res = x.GetContainer(packetId);
+                if (res != null)
                 {
-                    var res = x.GetContainer(packetId);
-                    if (res != null)
-                    {
-                        return res;
-                    }
+                    return res;
                 }
             }
-            return null;
         }
+        return null;
+    }
 
-        public override IDataSerializer Get(Type type)
+    public override IDataSerializer Get(Type type)
+    {
+        lock (LockObject)
         {
-            lock (lockObject)
+            foreach (var x in ProtoList)
             {
-                foreach (var x in ProtoList)
+                var res = x.Get(type);
+                if (res != null)
                 {
-                    var res = x.Get(type);
-                    if (res != null)
-                    {
-                        return res;
-                    }
+                    return res;
                 }
             }
-            return null;
         }
-        public override Structure Get<Structure>()
+        return null;
+    }
+    public override Structure Get<Structure>()
+    {
+        lock (LockObject)
         {
-            lock (lockObject)
+            foreach (var x in ProtoList)
             {
-                foreach (var x in ProtoList)
+                var res = x.Get<Structure>();
+                if (res != null)
                 {
-                    var res = x.Get<Structure>();
-                    if (res != null)
-                    {
-                        return res;
-                    }
+                    return res;
                 }
             }
-            return default(Structure);
         }
+        return default(Structure);
+    }
 
-        public override IPacketBuilder<Packet> GetBuilder<Packet>()
+    public override IPacketBuilder<Packet> GetBuilder<Packet>()
+    {
+        lock (LockObject)
         {
-            lock (lockObject)
+            foreach (var x in ProtoList)
             {
-                foreach (var x in ProtoList)
+                var res = x.GetBuilder<Packet>();
+                if (res != null)
                 {
-                    var res = x.GetBuilder<Packet>();
-                    if (res != null)
-                    {
-                        return res;
-                    }
+                    return res;
                 }
             }
-            return null;
         }
+        return null;
+    }
 
-        public override IPacketBuilder GetBuilder(Type type)
+    public override IPacketBuilder GetBuilder(Type type)
+    {
+        lock (LockObject)
         {
-            lock (lockObject)
+            foreach (var x in ProtoList)
             {
-                foreach (var x in ProtoList)
+                var res = x.GetBuilder(type);
+                if (res != null)
                 {
-                    var res = x.GetBuilder(type);
-                    if (res != null)
-                    {
-                        return res;
-                    }
+                    return res;
                 }
             }
-            return null;
         }
+        return null;
+    }
 
-        public override IPacketBuilder GetBuilder(uint packetId)
+    public override IPacketBuilder GetBuilder(uint packetId)
+    {
+        lock (LockObject)
         {
-            lock (lockObject)
+            foreach (var x in ProtoList)
             {
-                foreach (var x in ProtoList)
+                var res = x.GetBuilder(packetId);
+                if (res != null)
                 {
-                    var res = x.GetBuilder(packetId);
-                    if (res != null)
-                    {
-                        return res;
-                    }
+                    return res;
                 }
             }
-            return null;
         }
+        return null;
+    }
 
-        public override PacketBaseInformation GetInfo<Packet>()
+    public override PacketBaseInformation GetInfo<Packet>()
+    {
+        lock (LockObject)
         {
-            lock (lockObject)
+            foreach (var x in ProtoList)
             {
-                foreach (var x in ProtoList)
+                var res = x.GetInfo<Packet>();
+                if (res != null)
                 {
-                    var res = x.GetInfo<Packet>();
-                    if (res != null)
-                    {
-                        return res;
-                    }
+                    return res;
                 }
             }
-            return null;
         }
-        public override PacketBaseInformation GetInfo<Packet>(Packet packet)
+        return null;
+    }
+    public override PacketBaseInformation GetInfo<Packet>(Packet packet)
+    {
+        lock (LockObject)
         {
-            lock (lockObject)
+            foreach (var x in ProtoList)
             {
-                foreach (var x in ProtoList)
+                var res = x.GetInfo(packet);
+                if (res != null)
                 {
-                    var res = x.GetInfo(packet);
-                    if (res != null)
-                    {
-                        return res;
-                    }
+                    return res;
                 }
             }
-            return null;
         }
+        return null;
+    }
 
-        public override PacketBaseInformation GetInfo(Type type)
+    public override PacketBaseInformation GetInfo(Type type)
+    {
+        lock (LockObject)
         {
-            lock (lockObject)
+            foreach (var x in ProtoList)
             {
-                foreach (var x in ProtoList)
+                var res = x.GetInfo(type);
+                if (res != null)
                 {
-                    var res = x.GetInfo(type);
-                    if (res != null)
-                    {
-                        return res;
-                    }
+                    return res;
                 }
             }
-            return null;
         }
+        return null;
+    }
 
-        public override PacketBaseInformation GetInfo(uint packetId)
+    public override PacketBaseInformation GetInfo(uint packetId)
+    {
+        lock (LockObject)
         {
-            lock (lockObject)
+            foreach (var x in ProtoList)
             {
-                foreach (var x in ProtoList)
+                var res = x.GetInfo(packetId);
+                if (res != null)
                 {
-                    var res = x.GetInfo(packetId);
-                    if (res != null)
-                    {
-                        return res;
-                    }
+                    return res;
                 }
             }
-            return null;
         }
+        return null;
     }
 }
