@@ -1,76 +1,126 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Link.Security;
 using Link.IO;
 
-namespace Link.Net
+namespace Link.Net;
+
+public abstract class Connection
 {
-    public abstract class Connection
+    private readonly SemaphoreSlim _encodeLock = new(1, 1);
+    private readonly SemaphoreSlim _decodeLock = new(1, 1);
+    private ConnectionState _state = ConnectionState.NotWorking;
+
+    public event EventHandler? StateChanged;
+    public event ReceivedDataHandler? DataReceived;
+
+    public EncodeStack EncodeStack { get; }
+    public EncodeStack DecodeStack { get; }
+
+    public EncodeContainer Encoder { get; }
+    public EncodeContainer Decoder { get; }
+
+    protected Connection()
     {
-        public event EventHandler StateChanged;
-        public event ReceivedDataHandler DataReceived;
+        EncodeStack = new EncodeStack();
+        DecodeStack = new EncodeStack();
 
-        public EncodeStack EncodeStack { get; private set; }
-        public EncodeStack DecodeStack { get; private set; }
+        Encoder = EncodeContainer.Create(EncodeStack);
+        Decoder = EncodeContainer.Create(DecodeStack);
+    }
 
-        public EncodeContainer Encoder { get; private set; }
-        public EncodeContainer Decoder { get; private set; }
-
-        public Connection()
+    public virtual ConnectionState State
+    {
+        get => _state;
+        protected set
         {
-            EncodeStack = new EncodeStack();
-            DecodeStack = new EncodeStack();
-
-            Encoder = EncodeContainer.Create(EncodeStack);
-            Decoder = EncodeContainer.Create(DecodeStack);
+            _state = value;
+            StateChanged?.Invoke(this, EventArgs.Empty);
         }
+    }
 
-        private ConnectionState state = ConnectionState.NotWorking;
-        public virtual ConnectionState State
+    public abstract void Start();
+    public abstract void Stop();
+    public abstract void Close();
+
+    public virtual bool Send(byte[] buffer, int offset, int length)
+    {
+        _encodeLock.Wait();
+        try
         {
-            get
-            {
-                return state;
-            }
-            protected set
-            {
-                state = value;
-                StateChanged?.Invoke(this, EventArgs.Empty);
-            }
+            Encoder.Reset();
+            Encoder.Encode(buffer, offset, length);
+            return ProcessSend(
+                Encoder.OutputStream.Buffer,
+                Encoder.OutputStream.Position,
+                Encoder.OutputStream.Count - Encoder.OutputStream.Position);
         }
-
-        public abstract void Start();
-        public abstract void Stop();
-        public abstract void Close();
-
-        public virtual bool Send(byte[] buffer, int offset, int length)
+        finally
         {
-            lock (EncodeStack)
-            {
-                Encoder.Reset();
-                Encoder.Encode(buffer, offset, length);
-                return ProcessSend(
-                    Encoder.OutputStream.Buffer, 
-                    Encoder.OutputStream.Position, 
-                    Encoder.OutputStream.Count - Encoder.OutputStream.Position);
-            }
+            _encodeLock.Release();
         }
+    }
 
-        protected abstract bool ProcessSend(byte[] buffer, int offset, int length);
-        protected virtual void ProcessReceive(byte[] buffer, int offset, int length)
+    public virtual async ValueTask<bool> SendAsync(byte[] buffer, int offset, int length, CancellationToken cancellationToken = default)
+    {
+        await _encodeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            lock (DecodeStack)
-            {
-                Decoder.Reset();
-                Decoder.Encode(buffer, offset, length);
-                DataReceived?.Invoke(this, 
-                    Decoder.OutputStream.Buffer, 
-                    Decoder.OutputStream.Position, 
-                    Decoder.OutputStream.Count - Decoder.OutputStream.Position);
-            }
+            Encoder.Reset();
+            Encoder.Encode(buffer, offset, length);
+            return await ProcessSendAsync(
+                Encoder.OutputStream.Buffer,
+                Encoder.OutputStream.Position,
+                Encoder.OutputStream.Count - Encoder.OutputStream.Position,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _encodeLock.Release();
+        }
+    }
+
+    protected abstract bool ProcessSend(byte[] buffer, int offset, int length);
+
+    protected virtual ValueTask<bool> ProcessSendAsync(byte[] buffer, int offset, int length, CancellationToken cancellationToken)
+    {
+        return new ValueTask<bool>(ProcessSend(buffer, offset, length));
+    }
+
+    protected virtual void ProcessReceive(byte[] buffer, int offset, int length)
+    {
+        _decodeLock.Wait();
+        try
+        {
+            Decoder.Reset();
+            Decoder.Encode(buffer, offset, length);
+            DataReceived?.Invoke(this,
+                Decoder.OutputStream.Buffer,
+                Decoder.OutputStream.Position,
+                Decoder.OutputStream.Count - Decoder.OutputStream.Position);
+        }
+        finally
+        {
+            _decodeLock.Release();
+        }
+    }
+
+    protected virtual async ValueTask ProcessReceiveAsync(byte[] buffer, int offset, int length, CancellationToken cancellationToken = default)
+    {
+        await _decodeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            Decoder.Reset();
+            Decoder.Encode(buffer, offset, length);
+            DataReceived?.Invoke(this,
+                Decoder.OutputStream.Buffer,
+                Decoder.OutputStream.Position,
+                Decoder.OutputStream.Count - Decoder.OutputStream.Position);
+        }
+        finally
+        {
+            _decodeLock.Release();
         }
     }
 }
