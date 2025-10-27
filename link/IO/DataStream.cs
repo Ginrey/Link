@@ -1,11 +1,14 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Link.IO
 {
     /// <summary>
-    /// Реализация потока данных.
+    /// Реализация потока данных с поддержкой современных .NET 9 возможностей.
     /// </summary>
     public class DataStream : IDisposable
     {
@@ -14,7 +17,7 @@ namespace Link.IO
         private byte[] buffer;
         private int pos;
         private bool isLittleEndian = true;
-        private Stack<bool> savedEndianness;
+        private Stack<bool>? savedEndianness;
 
         /// <summary>
         /// Буфер текущего потока.
@@ -70,6 +73,36 @@ namespace Link.IO
         }
 
         /// <summary>
+        /// Получить Span<byte> для текущих данных в потоке.
+        /// </summary>
+        public Span<byte> AsSpan() => buffer.AsSpan(0, Count);
+
+        /// <summary>
+        /// Получить Span<byte> для непрочитанных данных в потоке.
+        /// </summary>
+        public Span<byte> AsSpanUnread() => buffer.AsSpan(pos, Count - pos);
+
+        /// <summary>
+        /// Получить ReadOnlySpan<byte> для текущих данных в потоке.
+        /// </summary>
+        public ReadOnlySpan<byte> AsReadOnlySpan() => buffer.AsSpan(0, Count);
+
+        /// <summary>
+        /// Получить ReadOnlySpan<byte> для непрочитанных данных в потоке.
+        /// </summary>
+        public ReadOnlySpan<byte> AsReadOnlySpanUnread() => buffer.AsSpan(pos, Count - pos);
+
+        /// <summary>
+        /// Получить Memory<byte> для текущих данных в потоке.
+        /// </summary>
+        public Memory<byte> AsMemory() => buffer.AsMemory(0, Count);
+
+        /// <summary>
+        /// Получить Memory<byte> для непрочитанных данных в потоке.
+        /// </summary>
+        public Memory<byte> AsMemoryUnread() => buffer.AsMemory(pos, Count - pos);
+
+        /// <summary>
         /// Явное преобразование byte[] в DataStream.
         /// </summary>
         /// <param name="bytes"></param>
@@ -112,7 +145,7 @@ namespace Link.IO
         public DataStream(byte[] sourceBytes)
         {
             Reserve(sourceBytes.Length);
-            System.Buffer.BlockCopy(sourceBytes, 0, buffer, 0, sourceBytes.Length);
+            sourceBytes.AsSpan().CopyTo(buffer);
             Count = sourceBytes.Length;
         }
 
@@ -125,20 +158,32 @@ namespace Link.IO
         public DataStream(byte[] sourceBytes, int position, int count)
         {
             Reserve(count);
-            System.Buffer.BlockCopy(sourceBytes, position, buffer, 0, count);
+            sourceBytes.AsSpan(position, count).CopyTo(buffer);
             Count = count;
+        }
+
+        /// <summary>
+        /// Инициализирует поток, используя ReadOnlySpan<byte>.
+        /// </summary>
+        /// <param name="sourceBytes">Span байт</param>
+        public DataStream(ReadOnlySpan<byte> sourceBytes)
+        {
+            Reserve(sourceBytes.Length);
+            sourceBytes.CopyTo(buffer);
+            Count = sourceBytes.Length;
         }
 
         /// <summary>
         /// Очистка потока от прочитанных байт.
         /// </summary>
         /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public DataStream Flush()
         {
             var len = Count - pos;
 
             if (len != 0)
-                System.Buffer.BlockCopy(buffer, pos, buffer, 0, len);
+                buffer.AsSpan(pos, len).CopyTo(buffer);
 
             pos = 0;
             Count = len;
@@ -255,12 +300,31 @@ namespace Link.IO
         }
 
         /// <summary>
+        /// Проталкивает Span байт в конец потока (оптимизированная версия).
+        /// </summary>
+        /// <param name="bytes">Span байт</param>
+        /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public DataStream PushBack(ReadOnlySpan<byte> bytes)
+        {
+            if (bytes.IsEmpty)
+            {
+                return this;
+            }
+            Reserve(Count + bytes.Length);
+            bytes.CopyTo(buffer.AsSpan(Count));
+            Count += bytes.Length;
+            return this;
+        }
+
+        /// <summary>
         /// Проталкивает массив байт в конец потока.
         /// </summary>
         /// <param name="bytes">Массив байт</param>
         /// <param name="len">Количество байт</param>
         /// <param name="offset">Отступ</param>
         /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public DataStream PushBack(byte[] bytes, int offset, int len)
         {
             if (bytes == null)
@@ -268,7 +332,7 @@ namespace Link.IO
                 return this;
             }
             Reserve(Count + len);
-            System.Buffer.BlockCopy(bytes, offset, buffer, Count, len);
+            bytes.AsSpan(offset, len).CopyTo(buffer.AsSpan(Count));
             Count += len;
 
             return this;
@@ -331,6 +395,7 @@ namespace Link.IO
         /// <param name="insertArrayOffset">Оффсет вставляемого массива</param>
         /// <param name="bytesCount">Кол-во байт, которые вставляем</param>
         /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public DataStream Insert(int offset, byte[] insertArray, int insertArrayOffset, int bytesCount)
         {
             if (insertArray == null)
@@ -339,10 +404,33 @@ namespace Link.IO
             }
             Reserve(Count + bytesCount);
             // Передвигаем байты по буферу назад, на длину вставляемого массива.
-            System.Buffer.BlockCopy(buffer, 0, buffer, offset + bytesCount, Count - offset);
+            buffer.AsSpan(offset, Count - offset).CopyTo(buffer.AsSpan(offset + bytesCount));
             // Вставляем данные
-            System.Buffer.BlockCopy(insertArray, insertArrayOffset, buffer, offset, bytesCount);
+            insertArray.AsSpan(insertArrayOffset, bytesCount).CopyTo(buffer.AsSpan(offset));
             Count += bytesCount;
+
+            return this;
+        }
+
+        /// <summary>
+        /// Вставляет указанные байты в поток (Span-версия).
+        /// </summary>
+        /// <param name="offset">Оффсет потока</param>
+        /// <param name="insertSpan">Span байт для вставки</param>
+        /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public DataStream Insert(int offset, ReadOnlySpan<byte> insertSpan)
+        {
+            if (insertSpan.IsEmpty)
+            {
+                return this;
+            }
+            Reserve(Count + insertSpan.Length);
+            // Передвигаем байты по буферу назад, на длину вставляемого массива.
+            buffer.AsSpan(offset, Count - offset).CopyTo(buffer.AsSpan(offset + insertSpan.Length));
+            // Вставляем данные
+            insertSpan.CopyTo(buffer.AsSpan(offset));
+            Count += insertSpan.Length;
 
             return this;
         }
@@ -369,12 +457,26 @@ namespace Link.IO
         /// Возвращает байты потока.
         /// </summary>
         /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Byte[] GetBytes()
         {
-            var rtnArray = new byte[Count];
-            System.Buffer.BlockCopy(buffer, pos, rtnArray, 0, Count - pos);
+            var rtnArray = new byte[Count - pos];
+            buffer.AsSpan(pos, Count - pos).CopyTo(rtnArray);
 
             return rtnArray;
+        }
+
+        /// <summary>
+        /// Копирует непрочитанные байты в указанный Span.
+        /// </summary>
+        /// <param name="destination">Целевой Span</param>
+        /// <returns>Количество скопированных байт</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int CopyTo(Span<byte> destination)
+        {
+            var length = Math.Min(Count - pos, destination.Length);
+            buffer.AsSpan(pos, length).CopyTo(destination);
+            return length;
         }
 
         /// <summary>
@@ -438,18 +540,50 @@ namespace Link.IO
         /// </summary>
         /// <param name="bytesCount">Кол-во байт</param>
         /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Byte[] ReadBytes(int bytesCount)
         {
             if (pos + bytesCount > Count)
                 throw new MarshallerException(this);
 
             var rtnArray = new byte[bytesCount];
-            System.Buffer.BlockCopy(buffer, pos, rtnArray, 0, bytesCount);
+            buffer.AsSpan(pos, bytesCount).CopyTo(rtnArray);
             pos += bytesCount;
 
             return rtnArray;
         }
-        public bool TryRead(out byte[] buffer, int bytesCount)
+
+        /// <summary>
+        /// Читаем указанное кол-во байт в Span (оптимизированная версия).
+        /// </summary>
+        /// <param name="destination">Целевой Span</param>
+        /// <returns>true если успешно</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryReadBytes(Span<byte> destination)
+        {
+            if (pos + destination.Length > Count)
+                return false;
+
+            buffer.AsSpan(pos, destination.Length).CopyTo(destination);
+            pos += destination.Length;
+            return true;
+        }
+
+        /// <summary>
+        /// Читаем указанное кол-во байт в Span.
+        /// </summary>
+        /// <param name="destination">Целевой Span</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void ReadBytes(Span<byte> destination)
+        {
+            if (pos + destination.Length > Count)
+                throw new MarshallerException(this);
+
+            buffer.AsSpan(pos, destination.Length).CopyTo(destination);
+            pos += destination.Length;
+        }
+
+        public bool TryRead(out byte[]? buffer, int bytesCount)
         {
             if (pos + bytesCount > Count)
             {
@@ -459,7 +593,7 @@ namespace Link.IO
             else
             {
                 buffer = new byte[bytesCount];
-                System.Buffer.BlockCopy(this.buffer, pos, buffer, 0, bytesCount);
+                this.buffer.AsSpan(pos, bytesCount).CopyTo(buffer);
 
                 pos += bytesCount;
 
@@ -470,6 +604,7 @@ namespace Link.IO
         {
             return TryRead(buffer, 0, buffer.Length);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryRead(byte[] buffer, int offset, int count)
         {
             if (pos + count > Count)
@@ -478,7 +613,7 @@ namespace Link.IO
             }
             else
             {
-                System.Buffer.BlockCopy(this.buffer, pos, buffer, offset, count);
+                this.buffer.AsSpan(pos, count).CopyTo(buffer.AsSpan(offset));
                 pos += count;
                 return true;
             }
@@ -488,6 +623,7 @@ namespace Link.IO
         /// Читаем CUInt32 размер массива, затем Byte[] из потока.
         /// </summary>
         /// <returns></returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Byte[] ReadBytes()
         {
             var length = (int)ReadCompactUInt32();
@@ -496,12 +632,12 @@ namespace Link.IO
                 throw new MarshallerException(this);
 
             var rtnArray = new byte[length];
-            System.Buffer.BlockCopy(buffer, pos, rtnArray, 0, length);
+            buffer.AsSpan(pos, length).CopyTo(rtnArray);
             pos += length;
 
             return rtnArray;
         }
-        public bool TryRead(out byte[] buffer)
+        public bool TryRead(out byte[]? buffer)
         {
             buffer = null;
 
