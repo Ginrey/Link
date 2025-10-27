@@ -56,7 +56,7 @@ public class AuthModule : ProtoModuleBase
             response.Identity.SetAsciiString(Login);
             response.Key.Data = hash;
             response.UseToken = false;
-            response.CliFingerprint.Data = new byte[]{ 0xFF, 0xFF, 0xFF, 0xFF };
+            response.CliFingerprint.Data = [0xFF, 0xFF, 0xFF, 0xFF];
 
             e.Chain.Redirect.SendPacket(response);
         }

@@ -12,8 +12,8 @@ namespace Link.Net;
 public class SocketConnection : Connection
 {
     public Socket BaseSocket { get; private set; }
-    public SocketAsyncEventArgs? SocketReceiveArgs { get; private set; }
-    public SocketAsyncEventArgs? SocketSendArgs { get; private set; }
+    // public SocketAsyncEventArgs? SocketReceiveArgs { get; private set; }
+    // public SocketAsyncEventArgs? SocketSendArgs { get; private set; }
 
     private IPool<SocketAsyncEventArgs> ReceivePool { get; }
     private IPool<SocketAsyncEventArgs> SendPool { get; }
@@ -27,11 +27,11 @@ public class SocketConnection : Connection
         SendPool = sendPool;
         ReceivePool = receivePool;
 
-        SocketReceiveArgs = receivePool.Take();
-        SocketSendArgs = sendPool.Take();
-
-        SocketReceiveArgs.Completed += socketArgsRecv_Completed;
-        SocketSendArgs.Completed += socketArgsSend_Completed;
+        // SocketReceiveArgs = receivePool.Take();
+        // SocketSendArgs = sendPool.Take();
+        //
+        // SocketReceiveArgs.Completed += socketArgsRecv_Completed;
+        // SocketSendArgs.Completed += socketArgsSend_Completed;
     }
     public SocketConnection(Socket socket) : this(
         socket,
@@ -65,9 +65,10 @@ public class SocketConnection : Connection
         set => _usePipelineMode = value;
     }
 
-    public override async void Start()
+    public override async Task Start()
     {
         await _stateSemaphore.WaitAsync().ConfigureAwait(false);
+        
         try
         {
             if (State == ConnectionState.Working)
@@ -77,24 +78,15 @@ public class SocketConnection : Connection
             State = ConnectionState.Working;
             _receiveCts = new CancellationTokenSource();
 
-            if (_usePipelineMode)
-            {
-                // Modern Pipe-based receive (recommended)
-                _receivePipe = new Pipe(new PipeOptions(
-                    pool: MemoryPool<byte>.Shared,
-                    pauseWriterThreshold: 1024 * 1024,  // 1MB backpressure
-                    resumeWriterThreshold: 512 * 1024,   // 512KB resume
-                    useSynchronizationContext: false
-                ));
+            _receivePipe = new Pipe(new PipeOptions(
+                pool: MemoryPool<byte>.Shared,
+                pauseWriterThreshold: 1024 * 1024, // 1MB backpressure
+                resumeWriterThreshold: 512 * 1024, // 512KB resume
+                useSynchronizationContext: false
+            ));
 
-                _fillPipeTask = FillPipeAsync(_receivePipe.Writer, _receiveCts.Token);
-                _processPipeTask = ProcessPipeAsync(_receivePipe.Reader, _receiveCts.Token);
-            }
-            else
-            {
-                // Legacy receive loop (backward compatibility)
-                _ = ReceiveLoopAsync(_receiveCts.Token);
-            }
+            _fillPipeTask = FillPipeAsync(_receivePipe.Writer, _receiveCts.Token);
+            _processPipeTask = ProcessPipeAsync(_receivePipe.Reader, _receiveCts.Token);
         }
         finally
         {
@@ -102,12 +94,12 @@ public class SocketConnection : Connection
         }
     }
 
-    public override async void Stop()
+    public override async Task Stop()
     {
         await _stateSemaphore.WaitAsync().ConfigureAwait(false);
         try
         {
-            _receiveCts?.Cancel();
+            await _receiveCts?.CancelAsync();
             State = ConnectionState.NotWorking;
         }
         finally
@@ -116,12 +108,12 @@ public class SocketConnection : Connection
         }
     }
 
-    public override async void Close()
+    public override async Task Close()
     {
         await _stateSemaphore.WaitAsync().ConfigureAwait(false);
         try
         {
-            _receiveCts?.Cancel();
+            await _receiveCts?.CancelAsync();
             _receiveCts?.Dispose();
             _receiveCts = null;
 
@@ -140,27 +132,21 @@ public class SocketConnection : Connection
             {
             }
             State = ConnectionState.Closed;
-            if (SocketReceiveArgs != null)
-            {
-                SocketReceiveArgs.Completed -= socketArgsRecv_Completed;
-                ReceivePool.Return(SocketReceiveArgs);
-            }
-            if (SocketSendArgs != null)
-            {
-                SocketSendArgs.Completed -= socketArgsSend_Completed;
-                SendPool.Return(SocketSendArgs);
-            }
+            // if (SocketReceiveArgs != null)
+            // {
+            //     SocketReceiveArgs.Completed -= socketArgsRecv_Completed;
+            //     ReceivePool.Return(SocketReceiveArgs);
+            // }
+            // if (SocketSendArgs != null)
+            // {
+            //     SocketSendArgs.Completed -= socketArgsSend_Completed;
+            //     SendPool.Return(SocketSendArgs);
+            // }
         }
         finally
         {
             _stateSemaphore.Release();
         }
-    }
-
-    [Obsolete("Use ProcessSendAsync instead")]
-    protected override bool ProcessSend(byte[] buffer, int offset, int length)
-    {
-        return StartSend(buffer, offset, length);
     }
 
     /// <summary>
@@ -176,16 +162,19 @@ public class SocketConnection : Connection
         try
         {
             var sent = await BaseSocket.SendAsync(data, SocketFlags.None, cancellationToken).ConfigureAwait(false);
+            
             if (sent == 0)
             {
-                Close();
+                await Close();
                 return false;
             }
+            
             return State != ConnectionState.Closed;
         }
         catch
         {
-            Close();
+            await Close();
+            
             return false;
         }
     }
@@ -205,14 +194,14 @@ public class SocketConnection : Connection
             var sent = await BaseSocket.SendAsync(new ReadOnlyMemory<byte>(buffer, offset, length), SocketFlags.None, cancellationToken).ConfigureAwait(false);
             if (sent == 0)
             {
-                Close();
+                await Close();
                 return false;
             }
             return State != ConnectionState.Closed;
         }
         catch
         {
-            Close();
+            await Close();
             return false;
         }
     }
@@ -232,14 +221,14 @@ public class SocketConnection : Connection
             var sent = await BaseSocket.SendAsync(data, SocketFlags.None, cancellationToken).ConfigureAwait(false);
             if (sent == 0)
             {
-                Close();
+                await Close();
                 return false;
             }
             return State != ConnectionState.Closed;
         }
         catch
         {
-            Close();
+            await Close();
             return false;
         }
     }
@@ -257,11 +246,11 @@ public class SocketConnection : Connection
             while (State == ConnectionState.Working && !cancellationToken.IsCancellationRequested)
             {
                 // Get memory from pipe's buffer (zero allocation, uses MemoryPool)
-                Memory<byte> memory = writer.GetMemory(minimumBufferSize);
+                var memory = writer.GetMemory(minimumBufferSize);
 
                 try
                 {
-                    int bytesRead = await BaseSocket.ReceiveAsync(memory, SocketFlags.None, cancellationToken).ConfigureAwait(false);
+                    var bytesRead = await BaseSocket.ReceiveAsync(memory, SocketFlags.None, cancellationToken).ConfigureAwait(false);
 
                     if (bytesRead == 0)
                     {
@@ -281,7 +270,7 @@ public class SocketConnection : Connection
                 }
 
                 // Make the data available to the PipeReader
-                FlushResult result = await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+                var result = await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
 
                 if (result.IsCompleted)
                 {
@@ -304,7 +293,7 @@ public class SocketConnection : Connection
             
             if (State == ConnectionState.Working)
             {
-                Close();
+                await Close();
             }
         }
     }
@@ -319,15 +308,15 @@ public class SocketConnection : Connection
         {
             while (State == ConnectionState.Working && !cancellationToken.IsCancellationRequested)
             {
-                ReadResult result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
-                ReadOnlySequence<byte> buffer = result.Buffer;
+                var result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+                var buffer = result.Buffer;
 
                 try
                 {
                     // Process the data
                     if (buffer.Length > 0)
                     {
-                        ProcessPipeBuffer(buffer);
+                        await ProcessPipeBufferAsync(buffer, cancellationToken);
                     }
 
                     // Tell the PipeReader how much was consumed
@@ -364,166 +353,26 @@ public class SocketConnection : Connection
     /// Process data from ReadOnlySequence (handles both single and multi-segment buffers).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ProcessPipeBuffer(ReadOnlySequence<byte> buffer)
+    private async Task ProcessPipeBufferAsync(ReadOnlySequence<byte> buffer, CancellationToken cancellationToken = default)
     {
         if (buffer.IsSingleSegment)
         {
-            // Fast path: single contiguous buffer
-            ProcessReceive(buffer.FirstSpan);
+            await ProcessReceiveAsync(buffer.First, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            // Multi-segment buffer: process each segment or copy to array
-            // For simplicity, copy to array. For max performance, could process segments individually.
-            if (buffer.Length <= 81920) // 80KB threshold for stackalloc
-            {
-                Span<byte> tempBuffer = stackalloc byte[(int)buffer.Length];
-                buffer.CopyTo(tempBuffer);
-                ProcessReceive(tempBuffer);
-            }
-            else
-            {
-                // Large buffer: use array
-                byte[] tempArray = buffer.ToArray();
-                ProcessReceive(tempArray.AsSpan());
-            }
-        }
-    }
-
-    /// <summary>
-    /// Устаревший асинхронный цикл приема данных.
-    /// Используется только если UsePipelineMode = false.
-    /// Для максимальной производительности используйте режим Pipes (по умолчанию).
-    /// </summary>
-    [Obsolete("Use Pipe-based receive (UsePipelineMode = true) for better performance")]
-    private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
-    {
-        var buffer = new byte[SocketReceiveArgs?.Buffer?.Length ?? 8192];
-        
-        while (State == ConnectionState.Working && !cancellationToken.IsCancellationRequested)
-        {
+            var length = (int)buffer.Length;
+            var rented = ArrayPool<byte>.Shared.Rent(length);
             try
             {
-                var received = await BaseSocket.ReceiveAsync(buffer, SocketFlags.None, cancellationToken).ConfigureAwait(false);
-                
-                if (received <= 0)
-                {
-                    Close();
-                    return;
-                }
-
-#if !DEBUG
-                try
-                {
-#endif
-                    if (State != ConnectionState.Closed)
-                    {
-                        ProcessReceive(buffer.AsSpan(0, received));
-                    }
-#if !DEBUG
-                }
-                catch
-                {
-                    Close();
-                    return;
-                }
-#endif
+                buffer.CopyTo(rented);
+                await ProcessReceiveAsync(new ReadOnlyMemory<byte>(rented, 0, length), cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            finally
             {
-                // Normal shutdown
-                return;
-            }
-            catch
-            {
-                Close();
-                return;
+                ArrayPool<byte>.Shared.Return(rented);
             }
         }
     }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool StartSend(byte[] buffer, int offset, int count)
-    {
-        if (State != ConnectionState.Working)
-        {
-            return false;
-        }
-        try
-        {
-            var len = BaseSocket.Send(buffer.AsSpan(offset, count), SocketFlags.None, out SocketError errorCode);
-            if (len == 0 || errorCode != SocketError.Success)
-            {
-                Close();
-            }
-            return State != ConnectionState.Closed;
-        }
-        catch
-        {
-            Close();
-            return false;
-        }
-    }
-
-    // Keep event-based methods for backward compatibility with SocketAsyncEventArgs
-    private void socketArgsRecv_Completed(object? sender, SocketAsyncEventArgs e)
-    {
-        ReceiveProcess(e);
-    }
-    private void socketArgsSend_Completed(object? sender, SocketAsyncEventArgs e)
-    {
-        SendProcess(e);
-    }
-    
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ReceiveProcess(SocketAsyncEventArgs socketArgs)
-    {
-        try
-        {
-            if (socketArgs.SocketError != SocketError.Success ||
-                socketArgs.BytesTransferred <= 0)
-            {
-                Close();
-                return;
-            }
-        }
-        catch
-        {
-            Close();
-            return;
-        }
-#if !DEBUG
-            try
-            {
-#endif
-        if (State != ConnectionState.Closed && socketArgs.Buffer != null)
-        {
-            // Используем Span для оптимизации
-            ProcessReceive(socketArgs.Buffer.AsSpan(socketArgs.Offset, socketArgs.BytesTransferred));
-        }
-#if !DEBUG
-            }
-            catch
-            {
-                Close();
-                return;
-            }
-#endif
-    }
-    private void SendProcess(SocketAsyncEventArgs socketArgs)
-    {
-        try
-        {
-            if (socketArgs.SocketError != SocketError.Success ||
-                socketArgs.BytesTransferred <= 0)
-            {
-                Close();
-                return;
-            }
-        }
-        catch
-        {
-            Close();
-        }
-    }
+  
 }

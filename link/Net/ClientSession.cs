@@ -6,25 +6,26 @@ namespace Link.Net;
 
 public class ClientSession : Session
 {
-    public Connector Connector { get; private set; }
+    private Connector Connector { get; set; } = null!;
 
     public ClientSession(string server,
-        IPool<DataStream> dataStreamPool = null, 
-        PacketReader packetReader = null, 
-        PacketWriter packetWriter = null,
-        PacketPolicy packetPolicy = null) : base(dataStreamPool, packetReader, packetWriter, packetPolicy)
+        IPool<DataStream>? dataStreamPool = null,
+        PacketReader? packetReader = null,
+        PacketWriter? packetWriter = null,
+        PacketPolicy? packetPolicy = null) : base(dataStreamPool, packetReader, packetWriter, packetPolicy)
     {
         Initialize(new TcpSocketOpener(server));
     }
 
     public ClientSession(IPassiveConnectionFactory factory,
-        IPool<DataStream> dataStreamPool = null, 
-        PacketReader packetReader = null, 
-        PacketWriter packetWriter = null,
-        PacketPolicy packetPolicy = null) : base(dataStreamPool, packetReader, packetWriter, packetPolicy)
+        IPool<DataStream>? dataStreamPool = null,
+        PacketReader? packetReader = null,
+        PacketWriter? packetWriter = null,
+        PacketPolicy? packetPolicy = null) : base(dataStreamPool, packetReader, packetWriter, packetPolicy)
     {
         Initialize(factory);
     }
+
     private void Initialize(IPassiveConnectionFactory factory)
     {
         Connector = Modules.Register<Connector>();
@@ -35,6 +36,7 @@ public class ClientSession : Session
     {
         Connector.Connect();
     }
+
     public override void Close()
     {
         Connector.Close();

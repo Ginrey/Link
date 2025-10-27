@@ -6,6 +6,7 @@ using Link.Pools;
 using Link.IO;
 using Link.Modules;
 using Link.Net.Protocol;
+using Link.Net.Protocol.Core;
 
 namespace Link.Net;
 
@@ -48,39 +49,31 @@ public class Session
 
     private readonly SemaphoreSlim _connectionSemaphore = new(1, 1);
     private readonly SemaphoreSlim _packetWriterSemaphore = new(1, 1);
+    private CancellationTokenSource? _dataReceiverCts;
 
     public Session(
-        IPool<DataStream> dataStreamPool = null, 
-        PacketReader packetReader = null, 
-        PacketWriter packetWriter = null,
-        PacketPolicy packetPolicy = null,
-        ProtoListTable baseProto = null)
+        IPool<DataStream>? dataStreamPool = null, 
+        PacketReader? packetReader = null, 
+        PacketWriter? packetWriter = null,
+        PacketPolicy? packetPolicy = null,
+        ProtoListTable? baseProto = null)
     {
-        if (dataStreamPool == null) 
-            dataStreamPool = Link.Pools.DataStreamPool.Instance;
-        if (packetReader == null) 
-            packetReader = new PacketReader(dataStreamPool.Take(), dataStreamPool.Take());
-        if (packetWriter == null)
-            packetWriter = new PacketWriter(dataStreamPool.Take(), dataStreamPool.Take());
-        if (packetPolicy == null)
-            packetPolicy = PacketPolicy.AllAcceptPolicy;
+        dataStreamPool ??= Link.Pools.DataStreamPool.Instance;
+        packetReader ??= new PacketReader(dataStreamPool.Take(), dataStreamPool.Take());
+        packetWriter ??= new PacketWriter(dataStreamPool.Take(), dataStreamPool.Take());
+        packetPolicy ??= PacketPolicy.AllAcceptPolicy;
 
         DataStreamPool = dataStreamPool;
         PacketReader = packetReader;
         PacketWriter = packetWriter;
         PacketPolicy = packetPolicy;
 
-        if (baseProto == null)
-        {
-            Proto = new ProtoListTable();
-        }
-        else
-        {
-            Proto = baseProto;
-        }
+        Proto = baseProto ?? new ProtoListTable();
 
-        Handler = new PacketHandlerTable();
-        Handler.Proto = Proto;
+        Handler = new PacketHandlerTable
+        {
+            Proto = Proto
+        };
         Modules = new ModulesManager(this);
 
         connectionInputRoute = new RouteChain();
@@ -108,14 +101,23 @@ public class Session
         {
             Close();
         }
+        
         await _connectionSemaphore.WaitAsync().ConfigureAwait(false);
+        
         try
         {
             ConnectionConfigurator?.Configure(connection);
 
             Connection = connection;
             Connection.StateChanged += Connection_StatusChanged;
-            Connection.DataReceived += ProcessReceivedData;
+            
+            // Создаем новый CancellationTokenSource для задачи чтения данных
+            _dataReceiverCts?.Cancel();
+            _dataReceiverCts?.Dispose();
+            _dataReceiverCts = new CancellationTokenSource();
+            
+            // Запускаем задачу чтения из канала вместо подписки на событие
+            _ = Task.Run(() => DataReceiverLoopAsync(_dataReceiverCts.Token), _dataReceiverCts.Token);
 
             PacketReader.Clear();
             State = SessionState.Working;
@@ -138,10 +140,14 @@ public class Session
 
     public virtual void Start()
     {
-        Connection.Start();
+        Connection?.Start();
     }
     public virtual void Close()
     {
+        _dataReceiverCts?.Cancel();
+        _dataReceiverCts?.Dispose();
+        _dataReceiverCts = null;
+        
         Connection?.Stop();
         Connection?.Close();
     }
@@ -153,7 +159,9 @@ public class Session
         {
             if (Connection?.State == ConnectionState.Closed)
             {
-                Connection.DataReceived -= ProcessReceivedData;
+                // Отменяем задачу чтения из канала
+                _dataReceiverCts?.Cancel();
+                
                 Connection.StateChanged -= Connection_StatusChanged;
 
                 if (ReferenceEquals(sender, Connection))
@@ -350,14 +358,14 @@ public class Session
 
     private async Task<bool> CheckConnectionAsync(Connection connection)
     {
-        await _connectionSemaphore.WaitAsync().ConfigureAwait(false);
+        // await _connectionSemaphore.WaitAsync().ConfigureAwait(false);
         try
         {
             return ReferenceEquals(connection, Connection);
         }
         finally
         {
-            _connectionSemaphore.Release();
+            // _connectionSemaphore.Release();
         }
     }
 
@@ -370,9 +378,46 @@ public class Session
     {
         InputChain?.Send(packet);
     }
-    private void ProcessReceivedData(object sender, byte[] buffer, int offset, int length)
+
+    /// <summary>
+    /// Асинхронный цикл чтения данных из канала Connection.DataReceivedChannel.
+    /// Заменяет подписку на событие Connection.DataReceived.
+    /// </summary>
+    private async Task DataReceiverLoopAsync(CancellationToken cancellationToken)
     {
-        var connection = (Connection)sender;
+        var connection = Connection;
+        if (connection == null)
+            return;
+
+        var channelReader = connection.DataReceivedChannel;
+
+        try
+        {
+            await foreach (var (buffer, offset, length) in channelReader.ReadAllAsync(cancellationToken))
+            {
+                // Проверяем, что соединение еще актуально
+                if (!await CheckConnectionAsync(connection))
+                {
+                    break;
+                }
+
+                ProcessReceivedData(connection, buffer, offset, length);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Нормальное завершение при отмене
+        }
+        catch (Exception ex)
+        {
+            // Логируем ошибку, если есть система логирования
+            // В текущей реализации просто завершаем цикл
+            Console.WriteLine($"Error in DataReceiverLoop: {ex}");
+        }
+    }
+    
+    private void ProcessReceivedData(Connection connection, byte[] buffer, int offset, int length)
+    {
         if (!CheckConnection(connection))
         {
             return;

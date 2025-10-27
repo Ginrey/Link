@@ -42,13 +42,15 @@ public static class MainClass
 {
     public static void Main(string[] args)
     {
-        var active = new TcpSocketListener();
-        var passive = new TcpSocketOpener(args.Length > 0 ? args[0] : "link1.pwonline.ru");
+    //     var active = new TcpSocketListener();
+    //     var passive = new TcpSocketOpener(args.Length > 0 ? args[0] : "link1.pwonline.ru");
+    //
+    //     var mitm = new MitmListner<MitmPair>(active, passive);
+    //     mitm.Accepting += Mitm_MitmPairAccepted;
+    //     mitm.Start();
 
-        var mitm = new MitmListner<MitmPair>(active, passive);
-        mitm.Accepting += Mitm_MitmPairAccepted;
-        mitm.Start();
-
+    var active = new TcpSocketOpener("45.138.160.104", 31004);
+    active.
         Thread.Sleep(Timeout.Infinite);
     }
 

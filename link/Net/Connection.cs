@@ -68,9 +68,9 @@ public abstract class Connection
         }
     }
 
-    public abstract void Start();
-    public abstract void Stop();
-    public abstract void Close();
+    public abstract Task Start();
+    public abstract Task Stop();
+    public abstract Task Close();
 
     public virtual bool Send(byte[] buffer, int offset, int length)
     {
@@ -79,7 +79,9 @@ public abstract class Connection
         {
             Encoder.Reset();
             Encoder.Encode(buffer, offset, length);
+            
             var memory = Encoder.OutputStream.AsMemory();
+            
             return ProcessSendAsync(memory).GetAwaiter().GetResult();
         }
         finally
@@ -198,6 +200,7 @@ public abstract class Connection
             Decoder.Reset();
             Decoder.OutputStream.Clear();
             Decoder.OutputStream.PushBack(data);
+            
             var resultBuffer = Decoder.OutputStream.Buffer;
             var resultOffset = Decoder.OutputStream.Position;
             var resultLength = Decoder.OutputStream.Count - Decoder.OutputStream.Position;
