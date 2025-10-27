@@ -17,6 +17,9 @@ public abstract class Connection
     public EncodeContainer Encoder { get; private set; }
     public EncodeContainer Decoder { get; private set; }
 
+    private readonly SemaphoreSlim _encodeSemaphore = new(1, 1);
+    private readonly SemaphoreSlim _decodeSemaphore = new(1, 1);
+
     public Connection()
     {
         EncodeStack = new EncodeStack();
@@ -43,7 +46,8 @@ public abstract class Connection
 
     public virtual bool Send(byte[] buffer, int offset, int length)
     {
-        lock (EncodeStack)
+        _encodeSemaphore.Wait();
+        try
         {
             Encoder.Reset();
             Encoder.Encode(buffer, offset, length);
@@ -51,6 +55,10 @@ public abstract class Connection
                 Encoder.OutputStream.Buffer, 
                 Encoder.OutputStream.Position, 
                 Encoder.OutputStream.Count - Encoder.OutputStream.Position);
+        }
+        finally
+        {
+            _encodeSemaphore.Release();
         }
     }
 
@@ -60,7 +68,8 @@ public abstract class Connection
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual bool Send(ReadOnlySpan<byte> data)
     {
-        lock (EncodeStack)
+        _encodeSemaphore.Wait();
+        try
         {
             Encoder.Reset();
             Encoder.OutputStream.Clear();
@@ -70,32 +79,61 @@ public abstract class Connection
                 Encoder.OutputStream.Position, 
                 Encoder.OutputStream.Count - Encoder.OutputStream.Position);
         }
+        finally
+        {
+            _encodeSemaphore.Release();
+        }
     }
 
     /// <summary>
     /// Асинхронная отправка данных.
     /// </summary>
-    public virtual ValueTask<bool> SendAsync(byte[] buffer, int offset, int length, CancellationToken cancellationToken = default)
+    public virtual async ValueTask<bool> SendAsync(byte[] buffer, int offset, int length, CancellationToken cancellationToken = default)
     {
-        // Базовая реализация - синхронная обертка
-        // Наследники должны переопределить для истинно асинхронного поведения
-        return new ValueTask<bool>(Send(buffer, offset, length));
+        await _encodeSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            Encoder.Reset();
+            Encoder.Encode(buffer, offset, length);
+            return ProcessSend(
+                Encoder.OutputStream.Buffer, 
+                Encoder.OutputStream.Position, 
+                Encoder.OutputStream.Count - Encoder.OutputStream.Position);
+        }
+        finally
+        {
+            _encodeSemaphore.Release();
+        }
     }
 
     /// <summary>
     /// Асинхронная отправка данных с использованием ReadOnlyMemory.
     /// </summary>
-    public virtual ValueTask<bool> SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
+    public virtual async ValueTask<bool> SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
     {
-        // Базовая реализация - синхронная обертка
-        return new ValueTask<bool>(Send(data.Span));
+        await _encodeSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            Encoder.Reset();
+            Encoder.OutputStream.Clear();
+            Encoder.OutputStream.PushBack(data.Span);
+            return ProcessSend(
+                Encoder.OutputStream.Buffer, 
+                Encoder.OutputStream.Position, 
+                Encoder.OutputStream.Count - Encoder.OutputStream.Position);
+        }
+        finally
+        {
+            _encodeSemaphore.Release();
+        }
     }
 
     protected abstract bool ProcessSend(byte[] buffer, int offset, int length);
         
     protected virtual void ProcessReceive(byte[] buffer, int offset, int length)
     {
-        lock (DecodeStack)
+        _decodeSemaphore.Wait();
+        try
         {
             Decoder.Reset();
             Decoder.Encode(buffer, offset, length);
@@ -103,6 +141,10 @@ public abstract class Connection
                 Decoder.OutputStream.Buffer, 
                 Decoder.OutputStream.Position, 
                 Decoder.OutputStream.Count - Decoder.OutputStream.Position);
+        }
+        finally
+        {
+            _decodeSemaphore.Release();
         }
     }
 
@@ -112,7 +154,8 @@ public abstract class Connection
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected virtual void ProcessReceive(ReadOnlySpan<byte> data)
     {
-        lock (DecodeStack)
+        _decodeSemaphore.Wait();
+        try
         {
             Decoder.Reset();
             Decoder.OutputStream.Clear();
@@ -121,6 +164,10 @@ public abstract class Connection
                 Decoder.OutputStream.Buffer, 
                 Decoder.OutputStream.Position, 
                 Decoder.OutputStream.Count - Decoder.OutputStream.Position);
+        }
+        finally
+        {
+            _decodeSemaphore.Release();
         }
     }
 }

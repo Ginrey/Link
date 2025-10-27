@@ -46,7 +46,8 @@ public class Session
     public ProtoListTable Proto { get; private set; }
     public ModulesManager Modules { get; private set; }
 
-    private readonly object lckObject = new();
+    private readonly SemaphoreSlim _connectionSemaphore = new(1, 1);
+    private readonly SemaphoreSlim _packetWriterSemaphore = new(1, 1);
 
     public Session(
         IPool<DataStream> dataStreamPool = null, 
@@ -101,13 +102,14 @@ public class Session
         OutputChain.Redirect = InputChain;
     }
 
-    public void SetupConnection(Connection connection, bool start = true)
+    public async Task SetupConnectionAsync(Connection connection, bool start = true)
     {
         if (Connection != null)
         {
             Close();
         }
-        lock (lckObject)
+        await _connectionSemaphore.WaitAsync().ConfigureAwait(false);
+        try
         {
             ConnectionConfigurator?.Configure(connection);
 
@@ -123,6 +125,15 @@ public class Session
                 Start();
             }
         }
+        finally
+        {
+            _connectionSemaphore.Release();
+        }
+    }
+
+    public void SetupConnection(Connection connection, bool start = true)
+    {
+        SetupConnectionAsync(connection, start).GetAwaiter().GetResult();
     }
 
     public virtual void Start()
@@ -135,11 +146,12 @@ public class Session
         Connection?.Close();
     }
 
-    private void Connection_StatusChanged(object sender, EventArgs e)
+    private async void Connection_StatusChanged(object? sender, EventArgs e)
     {
-        lock (lckObject)
+        await _connectionSemaphore.WaitAsync().ConfigureAwait(false);
+        try
         {
-            if (Connection.State == ConnectionState.Closed)
+            if (Connection?.State == ConnectionState.Closed)
             {
                 Connection.DataReceived -= ProcessReceivedData;
                 Connection.StateChanged -= Connection_StatusChanged;
@@ -150,6 +162,10 @@ public class Session
                     State = SessionState.Closed;
                 }
             }
+        }
+        finally
+        {
+            _connectionSemaphore.Release();
         }
     }
 
@@ -226,25 +242,46 @@ public class Session
     {
         OutputChain?.Send(packet);
     }
-    private bool SendNext(object sender, Packet packet)
+    private async Task<bool> SendNextAsync(object? sender, Packet packet)
     {
-        lock (PacketWriter)
+        await _packetWriterSemaphore.WaitAsync().ConfigureAwait(false);
+        try
         {
             PacketWriter.Clear();
             PacketWriter.Write(packet);
 
             return Send(PacketWriter);
         }
+        finally
+        {
+            _packetWriterSemaphore.Release();
+        }
     }
-    public bool SendNext(params Packet[] packets)
+
+    private bool SendNext(object? sender, Packet packet)
     {
-        lock (PacketWriter)
+        return SendNextAsync(sender, packet).GetAwaiter().GetResult();
+    }
+
+    public async Task<bool> SendNextAsync(params Packet[] packets)
+    {
+        await _packetWriterSemaphore.WaitAsync().ConfigureAwait(false);
+        try
         {
             PacketWriter.Clear();
             foreach (var packet in packets)
                 PacketWriter.Write(packet);
             return Send(PacketWriter);
         }
+        finally
+        {
+            _packetWriterSemaphore.Release();
+        }
+    }
+
+    public bool SendNext(params Packet[] packets)
+    {
+        return SendNextAsync(packets).GetAwaiter().GetResult();
     }
 
 
@@ -311,12 +348,22 @@ public class Session
         return Connection.SendAsync(packetWriter.GetBufferMemory(), cancellationToken);
     }
 
-    private bool CheckConnection(Connection connection)
+    private async Task<bool> CheckConnectionAsync(Connection connection)
     {
-        lock (lckObject)
+        await _connectionSemaphore.WaitAsync().ConfigureAwait(false);
+        try
         {
             return ReferenceEquals(connection, Connection);
         }
+        finally
+        {
+            _connectionSemaphore.Release();
+        }
+    }
+
+    private bool CheckConnection(Connection connection)
+    {
+        return CheckConnectionAsync(connection).GetAwaiter().GetResult();
     }
 
     private void ProcessReceivedPacket(Packet packet)

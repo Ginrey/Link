@@ -11,7 +11,7 @@ public class TcpSocketListener : IActiveConnectionFactory
 {
     public event ConnectionEventHandler? ConnectionAccept;
 
-    private readonly Lock _startLock = new();
+    private readonly SemaphoreSlim _startSemaphore = new(1, 1);
 
     public int BackLog { get; set; }
 
@@ -38,9 +38,10 @@ public class TcpSocketListener : IActiveConnectionFactory
     {
     }
 
-    public virtual void Start()
+    public virtual async void Start()
     {
-        lock (_startLock)
+        await _startSemaphore.WaitAsync().ConfigureAwait(false);
+        try
         {
             if (Started)
             {
@@ -53,10 +54,16 @@ public class TcpSocketListener : IActiveConnectionFactory
             Started = true;
             BeginAccept(BaseSocket);
         }
+        finally
+        {
+            _startSemaphore.Release();
+        }
     }
-    public virtual void Stop()
+
+    public virtual async void Stop()
     {
-        lock (_startLock)
+        await _startSemaphore.WaitAsync().ConfigureAwait(false);
+        try
         {
             if (!Started)
             {
@@ -64,6 +71,10 @@ public class TcpSocketListener : IActiveConnectionFactory
             }
             DisposeSocket(BaseSocket);
             Started = false;
+        }
+        finally
+        {
+            _startSemaphore.Release();
         }
     }
 

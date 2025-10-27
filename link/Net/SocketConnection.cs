@@ -16,6 +16,7 @@ public class SocketConnection : Connection
     private IPool<SocketAsyncEventArgs> ReceivePool { get; }
     private IPool<SocketAsyncEventArgs> SendPool { get; }
     private CancellationTokenSource? _receiveCts;
+    private readonly SemaphoreSlim _stateSemaphore = new(1, 1);
 
     public SocketConnection(Socket socket, IPool<SocketAsyncEventArgs> receivePool, IPool<SocketAsyncEventArgs> sendPool)
     {
@@ -45,9 +46,10 @@ public class SocketConnection : Connection
 
     private readonly object lckObject = new();
 
-    public override void Start()
+    public override async void Start()
     {
-        lock (lckObject)
+        await _stateSemaphore.WaitAsync().ConfigureAwait(false);
+        try
         {
             if (State == ConnectionState.Working)
             {
@@ -58,18 +60,30 @@ public class SocketConnection : Connection
             // Start async receive loop
             _ = ReceiveLoopAsync(_receiveCts.Token);
         }
+        finally
+        {
+            _stateSemaphore.Release();
+        }
     }
-    public override void Stop()
+
+    public override async void Stop()
     {
-        lock (lckObject)
+        await _stateSemaphore.WaitAsync().ConfigureAwait(false);
+        try
         {
             _receiveCts?.Cancel();
             State = ConnectionState.NotWorking;
         }
+        finally
+        {
+            _stateSemaphore.Release();
+        }
     }
-    public override void Close()
+
+    public override async void Close()
     {
-        lock (lckObject)
+        await _stateSemaphore.WaitAsync().ConfigureAwait(false);
+        try
         {
             _receiveCts?.Cancel();
             _receiveCts?.Dispose();
@@ -100,6 +114,10 @@ public class SocketConnection : Connection
                 SocketSendArgs.Completed -= socketArgsSend_Completed;
                 SendPool.Return(SocketSendArgs);
             }
+        }
+        finally
+        {
+            _stateSemaphore.Release();
         }
     }
     protected override bool ProcessSend(byte[] buffer, int offset, int length)
