@@ -48,7 +48,7 @@ public class Session
     public ModulesManager Modules { get; private set; }
 
     private readonly SemaphoreSlim _connectionSemaphore = new(1, 1);
-    private readonly object _packetWriterLock = new(); // Заменяем SemaphoreSlim на lock для синхронных операций
+    private readonly Lock _packetWriterLock = new();
     private CancellationTokenSource? _dataReceiverCts;
 
     public Session(

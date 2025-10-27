@@ -48,8 +48,8 @@ public abstract class Connection
     private readonly SemaphoreSlim _decodeSemaphore = new(1, 1);
     
     // Для синхронных методов используем обычные lock объекты
-    private readonly object _encodeLock = new();
-    private readonly object _decodeLock = new();
+    private readonly Lock _encodeLock = new();
+    private readonly Lock _decodeLock = new();
 
     public Connection()
     {
@@ -172,28 +172,6 @@ public abstract class Connection
         {
             Decoder.Reset();
             Decoder.Encode(buffer, offset, length);
-            var resultBuffer = Decoder.OutputStream.Buffer;
-            var resultOffset = Decoder.OutputStream.Position;
-            var resultLength = Decoder.OutputStream.Count - Decoder.OutputStream.Position;
-            
-            // Поддерживаем оба подхода: события и каналы
-            DataReceived?.Invoke(this, resultBuffer, resultOffset, resultLength);
-            _ = _dataReceivedChannel.Writer.TryWrite((resultBuffer, resultOffset, resultLength));
-        }
-    }
-
-    /// <summary>
-    /// Оптимизированная обработка получения данных с использованием Span.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected virtual void ProcessReceive(ReadOnlySpan<byte> data)
-    {
-        lock (_decodeLock)
-        {
-            Decoder.Reset();
-            Decoder.OutputStream.Clear();
-            Decoder.OutputStream.PushBack(data);
-            
             var resultBuffer = Decoder.OutputStream.Buffer;
             var resultOffset = Decoder.OutputStream.Position;
             var resultLength = Decoder.OutputStream.Count - Decoder.OutputStream.Position;

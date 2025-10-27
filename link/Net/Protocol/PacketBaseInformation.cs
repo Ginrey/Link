@@ -5,15 +5,15 @@ public class PacketBaseInformation
     public uint Id { get; private set; }
     public int MaximumSize { get; private set; }
 
-    public const int UlimitSize = -1;
+    public const int UnlimitSize = -1;
 
-    public PacketBaseInformation(uint id, int maximumSize = UlimitSize)
+    public PacketBaseInformation(uint id, int maximumSize = UnlimitSize)
     {
         Id = id;
         MaximumSize = maximumSize;
     }
 
-    public static PacketBaseInformation Create(uint id, int maximumSize = UlimitSize)
+    public static PacketBaseInformation Create(uint id, int maximumSize = UnlimitSize)
     {
         return new PacketBaseInformation(id, maximumSize);
     }
