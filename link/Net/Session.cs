@@ -1,4 +1,7 @@
 using System;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
 using Link.Pools;
 using Link.IO;
 using Link.Modules;
@@ -8,8 +11,8 @@ namespace Link.Net
 {
     public class Session
     {
-        public Connection Connection { get; private set; }
-        public IConnectionConfigurator ConnectionConfigurator { get; set; }
+        public Connection? Connection { get; private set; }
+        public IConnectionConfigurator? ConnectionConfigurator { get; set; }
 
         public IPool<DataStream> DataStreamPool { get; set; }
 
@@ -28,7 +31,7 @@ namespace Link.Net
         public RouteSession OutputChain { get; private set; }
 
 
-        public event EventHandler StateChanged;
+        public event EventHandler? StateChanged;
         private SessionState state = SessionState.NotWorking;
         public SessionState State
         {
@@ -46,7 +49,7 @@ namespace Link.Net
         public ProtoListTable Proto { get; private set; }
         public ModulesManager Modules { get; private set; }
 
-        private object lckObject = new object();
+        private readonly object lckObject = new object();
 
         public Session(
             IPool<DataStream> dataStreamPool = null, 
@@ -252,17 +255,63 @@ namespace Link.Net
         {
             return Send(packetWriter.GetBuffer());
         }
+
         public bool Send(ArraySegment<byte> buffer)
         {
-            return Send(buffer.Array, buffer.Offset, buffer.Count);
+            return Send(buffer.Array!, buffer.Offset, buffer.Count);
         }
+
         public bool Send(byte[] buffer)
         {
             return Send(buffer, 0, buffer.Length);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Send(byte[] buffer, int offset, int length)
         {
             return Connection?.Send(buffer, offset, length) ?? false;
+        }
+
+        /// <summary>
+        /// Modern Span-based send for better performance.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool Send(ReadOnlySpan<byte> data)
+        {
+            return Connection?.Send(data) ?? false;
+        }
+
+        /// <summary>
+        /// Async send with cancellation support.
+        /// </summary>
+        public ValueTask<bool> SendAsync(byte[] buffer, int offset, int length, CancellationToken cancellationToken = default)
+        {
+            if (Connection == null)
+                return new ValueTask<bool>(false);
+            
+            return Connection.SendAsync(buffer, offset, length, cancellationToken);
+        }
+
+        /// <summary>
+        /// Async send with ReadOnlyMemory for modern async patterns.
+        /// </summary>
+        public ValueTask<bool> SendAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
+        {
+            if (Connection == null)
+                return new ValueTask<bool>(false);
+            
+            return Connection.SendAsync(data, cancellationToken);
+        }
+
+        /// <summary>
+        /// Async send for PacketWriter.
+        /// </summary>
+        public ValueTask<bool> SendAsync(PacketWriter packetWriter, CancellationToken cancellationToken = default)
+        {
+            if (Connection == null)
+                return new ValueTask<bool>(false);
+            
+            return Connection.SendAsync(packetWriter.GetBufferMemory(), cancellationToken);
         }
 
         private bool CheckConnection(Connection connection)

@@ -1,7 +1,11 @@
-﻿namespace Link.IO
+﻿using System;
+using System.Runtime.CompilerServices;
+
+namespace Link.IO
 {
     /// <summary>
     /// Implementation of EndianBitConverter which converts to/from big-endian byte arrays.
+    /// Modernized with Span<T> support for .NET 9.
     /// </summary>
     public sealed class BigEndianBitConverter : EndianBitConverter
     {
@@ -46,6 +50,25 @@
         }
 
         /// <summary>
+        /// Copies the specified number of bytes from value to span.
+        /// Modern Span-based implementation for better performance.
+        /// </summary>
+        /// <param name="value">The value to copy</param>
+        /// <param name="bytes">The number of bytes to copy</param>
+        /// <param name="destination">The span to copy the bytes into</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected override void CopyBytesImpl(long value, int bytes, Span<byte> destination)
+        {
+            var endOffset = bytes - 1;
+
+            for (var i = 0; i < bytes; i++)
+            {
+                destination[endOffset - i] = unchecked((byte)(value & 0xff));
+                value = value >> 8;
+            }
+        }
+
+        /// <summary>
         /// Returns a value built from the specified number of bytes from the given buffer,
         /// starting at index.
         /// </summary>
@@ -60,6 +83,26 @@
 	        for (var i = 0; i < bytesToConvert; i++)
 	        {
 		        ret = unchecked((ret << 8) | buffer[startIndex + i]);
+	        }
+
+	        return ret;
+        }
+
+        /// <summary>
+        /// Returns a value built from the specified number of bytes from the given span.
+        /// Modern Span-based implementation for better performance.
+        /// </summary>
+        /// <param name="value">The data in span format</param>
+        /// <param name="bytesToConvert">The number of bytes to use</param>
+        /// <returns>The value built from the given bytes</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected override long FromBytes(ReadOnlySpan<byte> value, int bytesToConvert)
+        {
+            long ret = 0;
+
+	        for (var i = 0; i < bytesToConvert; i++)
+	        {
+		        ret = unchecked((ret << 8) | value[i]);
 	        }
 
 	        return ret;

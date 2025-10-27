@@ -1,9 +1,13 @@
 ﻿using System;
+using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace Link.IO
 {
     /// <summary>
     /// Equivalent of System.BitConverter, but with either endianness.
+    /// Modernized with Span<T> support for .NET 9.
     /// </summary>
     public abstract class EndianBitConverter
     {
@@ -261,6 +265,202 @@ namespace Link.IO
         /// <param name="bytesToConvert">The number of bytes to use in the conversion</param>
         /// <returns>The converted number</returns>
         protected abstract long FromBytes(byte[] value, int startIndex, int bytesToConvert);
+
+        /// <summary>
+        /// Convert the given number of bytes from the given span, from the given start
+        /// position, into a long, using the bytes as the least significant part of the long.
+        /// Modern Span-based version for better performance.
+        /// </summary>
+        /// <param name="value">The bytes to convert</param>
+        /// <param name="bytesToConvert">The number of bytes to use in the conversion</param>
+        /// <returns>The converted number</returns>
+        protected abstract long FromBytes(ReadOnlySpan<byte> value, int bytesToConvert);
+
+        #endregion
+
+        #region Span-based To(PrimitiveType) conversions
+
+        /// <summary>
+        /// Returns a 16-bit signed integer converted from two bytes in a span.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public short ToInt16(ReadOnlySpan<byte> value)
+        {
+            return unchecked((short)FromBytes(value, 2));
+        }
+
+        /// <summary>
+        /// Returns a 32-bit signed integer converted from four bytes in a span.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int ToInt32(ReadOnlySpan<byte> value)
+        {
+            return unchecked((int)FromBytes(value, 4));
+        }
+
+        /// <summary>
+        /// Returns a 64-bit signed integer converted from eight bytes in a span.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long ToInt64(ReadOnlySpan<byte> value)
+        {
+            return FromBytes(value, 8);
+        }
+
+        /// <summary>
+        /// Returns a 16-bit unsigned integer converted from two bytes in a span.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ushort ToUInt16(ReadOnlySpan<byte> value)
+        {
+            return unchecked((ushort)FromBytes(value, 2));
+        }
+
+        /// <summary>
+        /// Returns a 32-bit unsigned integer converted from four bytes in a span.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public uint ToUInt32(ReadOnlySpan<byte> value)
+        {
+            return unchecked((uint)FromBytes(value, 4));
+        }
+
+        /// <summary>
+        /// Returns a 64-bit unsigned integer converted from eight bytes in a span.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ulong ToUInt64(ReadOnlySpan<byte> value)
+        {
+            return unchecked((ulong)FromBytes(value, 8));
+        }
+
+        /// <summary>
+        /// Returns a single-precision floating point number converted from four bytes in a span.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public float ToSingle(ReadOnlySpan<byte> value)
+        {
+            return Int32BitsToSingle(ToInt32(value));
+        }
+
+        /// <summary>
+        /// Returns a double-precision floating point number converted from eight bytes in a span.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public double ToDouble(ReadOnlySpan<byte> value)
+        {
+            return Int64BitsToDouble(ToInt64(value));
+        }
+
+        #endregion
+
+        #region Span-based TryWrite methods
+
+        /// <summary>
+        /// Tries to write a 16-bit signed integer to a span in the appropriate endianness.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryWriteBytes(Span<byte> destination, short value)
+        {
+            if (destination.Length < 2)
+                return false;
+            CopyBytesImpl(value, 2, destination);
+            return true;
+        }
+
+        /// <summary>
+        /// Tries to write a 32-bit signed integer to a span in the appropriate endianness.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryWriteBytes(Span<byte> destination, int value)
+        {
+            if (destination.Length < 4)
+                return false;
+            CopyBytesImpl(value, 4, destination);
+            return true;
+        }
+
+        /// <summary>
+        /// Tries to write a 64-bit signed integer to a span in the appropriate endianness.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryWriteBytes(Span<byte> destination, long value)
+        {
+            if (destination.Length < 8)
+                return false;
+            CopyBytesImpl(value, 8, destination);
+            return true;
+        }
+
+        /// <summary>
+        /// Tries to write a 16-bit unsigned integer to a span in the appropriate endianness.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryWriteBytes(Span<byte> destination, ushort value)
+        {
+            if (destination.Length < 2)
+                return false;
+            CopyBytesImpl(value, 2, destination);
+            return true;
+        }
+
+        /// <summary>
+        /// Tries to write a 32-bit unsigned integer to a span in the appropriate endianness.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryWriteBytes(Span<byte> destination, uint value)
+        {
+            if (destination.Length < 4)
+                return false;
+            CopyBytesImpl(value, 4, destination);
+            return true;
+        }
+
+        /// <summary>
+        /// Tries to write a 64-bit unsigned integer to a span in the appropriate endianness.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryWriteBytes(Span<byte> destination, ulong value)
+        {
+            if (destination.Length < 8)
+                return false;
+            CopyBytesImpl(unchecked((long)value), 8, destination);
+            return true;
+        }
+
+        /// <summary>
+        /// Tries to write a single-precision floating point number to a span in the appropriate endianness.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryWriteBytes(Span<byte> destination, float value)
+        {
+            if (destination.Length < 4)
+                return false;
+            CopyBytesImpl(SingleToInt32Bits(value), 4, destination);
+            return true;
+        }
+
+        /// <summary>
+        /// Tries to write a double-precision floating point number to a span in the appropriate endianness.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TryWriteBytes(Span<byte> destination, double value)
+        {
+            if (destination.Length < 8)
+                return false;
+            CopyBytesImpl(DoubleToInt64Bits(value), 8, destination);
+            return true;
+        }
+
+        /// <summary>
+        /// Copies the given number of bytes from the least-specific
+        /// end of the specified value into the specified span.
+        /// Modern Span-based version for better performance.
+        /// </summary>
+        /// <param name="value">The value to copy bytes for</param>
+        /// <param name="bytes">The number of significant bytes to copy</param>
+        /// <param name="destination">The span to copy the bytes into</param>
+        protected abstract void CopyBytesImpl(long value, int bytes, Span<byte> destination);
 
         #endregion
 

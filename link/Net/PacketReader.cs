@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 using Link.IO;
 using Link.Pools;
 
@@ -23,7 +24,7 @@ namespace Link.Net
             }
         }
 
-        public PacketReader(DataStream networkStream = null, DataStream packetStream = null)
+        public PacketReader(DataStream? networkStream = null, DataStream? packetStream = null)
         {
             if (networkStream == null)
             {
@@ -42,6 +43,7 @@ namespace Link.Net
             };
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void UpdatePolicy(PacketPolicyState newPolicy)
         {
             if (newPolicy > PolicyState)
@@ -50,6 +52,7 @@ namespace Link.Net
             }
         }
         
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Reset()
         {
             PolicyState = PacketPolicyState.Accept;
@@ -64,11 +67,15 @@ namespace Link.Net
             }
 
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Clear()
         {
             Reset();
             networkStream.Clear();
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool ReadNext()
         {
             var id = (int)State;
@@ -87,6 +94,7 @@ namespace Link.Net
             }
             return result;
         }
+
         private bool ReadLength()
         {
             uint packetLength;
@@ -99,6 +107,7 @@ namespace Link.Net
             }
             return result;
         }
+
         private bool ReadContent()
         {
             if (!networkStream.CanReadBytes((int)PacketLength))
@@ -106,21 +115,35 @@ namespace Link.Net
                 return false;
             }
             PacketStream.Resize((int)PacketLength);
-            var result = networkStream.TryRead(PacketStream.Buffer, 0, (int)PacketLength);
+            
+            // Use Span-based read for better performance
+            var result = networkStream.TryReadBytes(PacketStream.Buffer.AsSpan(0, (int)PacketLength));
             if (result)
             {
                 State = PacketReaderState.Complete;
             }
             return result;
         }
+
         private bool ReadComplete()
         {
             Reset();
             return true;
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void PushBack(byte[] buffer, int offset, int length)
         {
             networkStream.PushBack(buffer, offset, length);
+        }
+
+        /// <summary>
+        /// Modern Span-based PushBack for better performance.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void PushBack(ReadOnlySpan<byte> data)
+        {
+            networkStream.PushBack(data);
         }
     }
 }
