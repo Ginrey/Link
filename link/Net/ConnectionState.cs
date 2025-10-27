@@ -1,12 +1,8 @@
-﻿using System;
+﻿namespace Link.Net;
 
-namespace Link.Net
+public enum ConnectionState
 {
-    public enum ConnectionState
-    {
-        NotWorking = 0,
-        Working = 1,
-        Closed = 2
-    }
+    NotWorking = 0,
+    Working = 1,
+    Closed = 2
 }
-

@@ -3,104 +3,88 @@ using System.Runtime.CompilerServices;
 using Link.IO;
 using Link.Pools;
 
-namespace Link.Net
+namespace Link.Net;
+
+public class PacketWriter
 {
-    public class PacketWriter
+    public DataStream NetworkStream { get; }
+
+    public DataStream PacketStream { get; }
+
+    public PacketWriter(DataStream? networkStream = null, DataStream? packetStream = null)
     {
-        private DataStream networkStream;
-        private DataStream packetStream;
-
-        public DataStream NetworkStream
+        if (networkStream == null)
         {
-            get
-            {
-                return networkStream;
-            }
+            networkStream = DataStreamPool.Instance.Take();
         }
-        public DataStream PacketStream
+        if (packetStream == null)
         {
-            get
-            {
-                return packetStream;
-            }
+            packetStream = DataStreamPool.Instance.Take();
         }
 
-        public PacketWriter(DataStream? networkStream = null, DataStream? packetStream = null)
-        {
-            if (networkStream == null)
-            {
-                networkStream = DataStreamPool.Instance.Take();
-            }
-            if (packetStream == null)
-            {
-                packetStream = DataStreamPool.Instance.Take();
-            }
+        NetworkStream = networkStream;
+        PacketStream = packetStream;
+    }
 
-            this.networkStream = networkStream;
-            this.packetStream = packetStream;
-        }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Clear()
+    {
+        NetworkStream.Clear();
+    }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Clear()
-        {
-            networkStream.Clear();
-        }
+    public void Write(uint packetId, IDataSerializer packet)
+    {
+        PacketStream.Clear();
+        PacketStream.Write(packet);
+        Write(packetId, PacketStream);
+    }
 
-        public void Write(uint packetId, IDataSerializer packet)
-        {
-            packetStream.Clear();
-            packetStream.Write(packet);
-            Write(packetId, packetStream);
-        }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Write(Packet packet)
+    {
+        Write(packet.Id, packet.Stream);
+    }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Write(Packet packet)
-        {
-            Write(packet.Id, packet.Stream);
-        }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Write(uint packetId, DataStream packetStream)
+    {
+        NetworkStream.WriteCompactUInt32(packetId);
+        NetworkStream.WriteCompactUInt32(packetStream.Count);
+        NetworkStream.PushBack(packetStream.AsReadOnlySpan());
+    }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Write(uint packetId, DataStream packetStream)
-        {
-            networkStream.WriteCompactUInt32(packetId);
-            networkStream.WriteCompactUInt32(packetStream.Count);
-            networkStream.PushBack(packetStream.AsReadOnlySpan());
-        }
+    /// <summary>
+    /// Modern Span-based write method for better performance.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Write(uint packetId, ReadOnlySpan<byte> packetData)
+    {
+        NetworkStream.WriteCompactUInt32(packetId);
+        NetworkStream.WriteCompactUInt32((uint)packetData.Length);
+        NetworkStream.PushBack(packetData);
+    }
 
-        /// <summary>
-        /// Modern Span-based write method for better performance.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Write(uint packetId, ReadOnlySpan<byte> packetData)
-        {
-            networkStream.WriteCompactUInt32(packetId);
-            networkStream.WriteCompactUInt32((uint)packetData.Length);
-            networkStream.PushBack(packetData);
-        }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ArraySegment<byte> GetBuffer()
+    {
+        return new ArraySegment<byte>(NetworkStream.Buffer, 0, NetworkStream.Count);
+    }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ArraySegment<byte> GetBuffer()
-        {
-            return new ArraySegment<byte>(networkStream.Buffer, 0, networkStream.Count);
-        }
+    /// <summary>
+    /// Modern Span-based accessor for network buffer.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ReadOnlySpan<byte> GetBufferSpan()
+    {
+        return NetworkStream.AsReadOnlySpan();
+    }
 
-        /// <summary>
-        /// Modern Span-based accessor for network buffer.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ReadOnlySpan<byte> GetBufferSpan()
-        {
-            return networkStream.AsReadOnlySpan();
-        }
-
-        /// <summary>
-        /// Modern Memory-based accessor for network buffer.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ReadOnlyMemory<byte> GetBufferMemory()
-        {
-            return networkStream.AsMemory();
-        }
+    /// <summary>
+    /// Modern Memory-based accessor for network buffer.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ReadOnlyMemory<byte> GetBufferMemory()
+    {
+        return NetworkStream.AsMemory();
     }
 }
-

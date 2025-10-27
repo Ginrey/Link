@@ -1,59 +1,55 @@
-﻿using System;
-using System.Net;
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Link.Pools;
 
-namespace Link.Net
+namespace Link.Net;
+
+public class TcpSocketOpener : IPassiveConnectionFactory
 {
-    public class TcpSocketOpener : IPassiveConnectionFactory
+    public ServerInfo ServerInfo { get; set; }
+    public IPool<SocketAsyncEventArgs> SocketAsyncEventArgsReceivePool { get; set; }
+    public IPool<SocketAsyncEventArgs> SocketAsyncEventArgsSendPool { get; set; }
+
+    public TcpSocketOpener() : this(ServerInfo.Local)
     {
-        public ServerInfo ServerInfo { get; set; }
-        public IPool<SocketAsyncEventArgs> SocketAsyncEventArgsReceivePool { get; set; }
-        public IPool<SocketAsyncEventArgs> SocketAsyncEventArgsSendPool { get; set; }
+    }
+    public TcpSocketOpener(string server) : this(ServerInfo.Parse(server))
+    {
+    }
+    public TcpSocketOpener(string host, int port) : this(new ServerInfo(host, port))
+    {
+    }
+    public TcpSocketOpener(string name, string host, int port) : this(new ServerInfo(host, port, name))
+    {
+    }
+    public TcpSocketOpener(ServerInfo serverInfo)
+    {
+        ServerInfo = serverInfo;
 
-        public TcpSocketOpener() : this(ServerInfo.Local)
-        {
-        }
-        public TcpSocketOpener(string server) : this(ServerInfo.Parse(server))
-        {
-        }
-        public TcpSocketOpener(string host, int port) : this(new ServerInfo(host, port))
-        {
-        }
-        public TcpSocketOpener(string name, string host, int port) : this(new ServerInfo(host, port, name))
-        {
-        }
-        public TcpSocketOpener(ServerInfo serverInfo)
-        {
-            ServerInfo = serverInfo;
+        SocketAsyncEventArgsReceivePool = SocketAsyncEventArgsPool.ReceiveInstance;
+        SocketAsyncEventArgsSendPool = SocketAsyncEventArgsPool.SendInstance;
+    }
 
-            SocketAsyncEventArgsReceivePool = SocketAsyncEventArgsPool.ReceiveInstance;
-            SocketAsyncEventArgsSendPool = SocketAsyncEventArgsPool.SendInstance;
-        }
+    public Connection Take()
+    {
+        var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        socket.Connect(ServerInfo.Host, ServerInfo.Port);
+        return new SocketConnection(socket);
+    }
 
-        public Connection Take()
-        {
-            var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            socket.Connect(ServerInfo.Host, ServerInfo.Port);
-            return new SocketConnection(socket);
-        }
+    /// <summary>
+    /// Асинхронное создание соединения.
+    /// </summary>
+    public async ValueTask<Connection> TakeAsync(CancellationToken cancellationToken = default)
+    {
+        var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await socket.ConnectAsync(ServerInfo.Host, ServerInfo.Port, cancellationToken).ConfigureAwait(false);
+        return new SocketConnection(socket);
+    }
 
-        /// <summary>
-        /// Асинхронное создание соединения.
-        /// </summary>
-        public async ValueTask<Connection> TakeAsync(CancellationToken cancellationToken = default)
-        {
-            var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            await socket.ConnectAsync(ServerInfo.Host, ServerInfo.Port, cancellationToken).ConfigureAwait(false);
-            return new SocketConnection(socket);
-        }
-
-        public void Free(Connection connection)
-        {
-            connection?.Close();
-        }
+    public void Free(Connection connection)
+    {
+        connection?.Close();
     }
 }
-

@@ -1,42 +1,39 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Threading.Tasks;
 
-namespace Link.Modules
+namespace Link.Modules;
+
+public class ReconnectorModule : ModuleBase
 {
-    public class ReconnectorModule : ModuleBase
+    public override void Destroy()
     {
-        public override void Destroy()
+        Session.StateChanged -= Session_StateChanged;
+    }
+
+    public Connector Connector { get; private set; }
+    public int Timeout { get; set; } = 5000;
+
+    public override void Initialize()
+    {
+        Connector = Session.Modules.Register<Connector>();
+        Session.StateChanged += Session_StateChanged;
+    }
+
+    private void Session_StateChanged(object sender, EventArgs e)
+    {
+        if (!Enabled)
         {
-            Session.StateChanged -= Session_StateChanged;
+            return;
         }
-
-        public Connector Connector { get; private set; }
-        public int Timeout { get; set; } = 5000;
-
-        public override void Initialize()
+        if (Session.State == Net.SessionState.Closed)
         {
-            Connector = Session.Modules.Register<Connector>();
-            Session.StateChanged += Session_StateChanged;
-        }
-
-        private void Session_StateChanged(object sender, EventArgs e)
-        {
-            if (!Enabled)
+            if (Timeout > 0)
             {
-                return;
+                Task.Delay(Timeout).ContinueWith(x => Connector.Connect());
             }
-            if (Session.State == Net.SessionState.Closed)
+            else
             {
-                if (Timeout > 0)
-                {
-                    Task.Delay(Timeout).ContinueWith(x => Connector.Connect());
-                }
-                else
-                {
-                    Connector.Connect();
-                }
+                Connector.Connect();
             }
         }
     }

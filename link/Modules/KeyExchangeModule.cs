@@ -1,67 +1,62 @@
-﻿using System;
-using Link.Net;
-using Link.Net.Protocol;
-using Link.IO;
+﻿using Link.Net;
 using Link.Security;
 using Link.Net.Protocol.Core;
 
-namespace Link.Modules
+namespace Link.Modules;
+
+public class KeyExchangeModule : ProtoModuleBase
 {
-    public class KeyExchangeModule : ProtoModuleBase
+    public MD5Hash MD5Hash { get; private set; }
+    public bool IsClient { get; private set; }
+
+    public KeyExchangeModule()
     {
-        public MD5Hash MD5Hash { get; private set; }
-        public bool IsClient { get; private set; }
+        MD5Hash = new MD5Hash();
+    }
 
-        public KeyExchangeModule()
+
+    public override void RegisterHandlers()
+    {
+        Register<Response>(ResponseReceive, PacketHandlerPriority.High);
+        Register<KeyExchange>(KeyExchangeReceive, PacketHandlerPriority.System);
+    }
+
+    protected virtual void ResponseReceive(object sender, PacketEventArgs e)
+    {
+        if (!e.IsComplete)
         {
-            MD5Hash = new MD5Hash();
+            var response = e.Read<Response>();
+            MD5Hash.SetHash(response.Identity.Data, response.Key.Data);
+
+            IsClient = !e.Chain.IsInput;
         }
+    }
 
-
-        public override void RegisterHandlers()
+    protected virtual void KeyExchangeReceive(object sender, PacketEventArgs e)
+    {
+        if (!e.IsComplete)
         {
-            Register<Response>(ResponseReceive, PacketHandlerPriority.High);
-            Register<KeyExchange>(KeyExchangeReceive, PacketHandlerPriority.System);
-        }
+            var keyExchange = e.Read<KeyExchange>();
+            var key = MD5Hash.GetKey(keyExchange.Nonce.Data);
 
-        protected virtual void ResponseReceive(object sender, PacketEventArgs e)
-        {
-            if (!e.IsComplete)
+            var rc4Encryption = new Rc4Encryption(key);
+
+            if (e.Chain.IsInput)
             {
-                var response = e.Read<Response>();
-                MD5Hash.SetHash(response.Identity.Data, response.Key.Data);
-
-                IsClient = !e.Chain.IsInput;
-            }
-        }
-
-        protected virtual void KeyExchangeReceive(object sender, PacketEventArgs e)
-        {
-            if (!e.IsComplete)
-            {
-                var keyExchange = e.Read<KeyExchange>();
-                var key = MD5Hash.GetKey(keyExchange.Nonce.Data);
-
-                var rc4Encryption = new Rc4Encryption(key);
-
-                if (e.Chain.IsInput)
+                if (!IsClient)
                 {
-                    if (!IsClient)
-                    {
-                        Session.Connection.EncodeStack.Setup(new MppcPacker());
-                    }
-                    Session.Connection.EncodeStack.Setup(rc4Encryption);
+                    Session.Connection.EncodeStack.Setup(new MppcPacker());
                 }
-                else
+                Session.Connection.EncodeStack.Setup(rc4Encryption);
+            }
+            else
+            {
+                Session.Connection.DecodeStack.Setup(rc4Encryption);
+                if (IsClient)
                 {
-                    Session.Connection.DecodeStack.Setup(rc4Encryption);
-                    if (IsClient)
-                    {
-                        Session.Connection.DecodeStack.Setup(new MppcUnpacker());
-                    }
+                    Session.Connection.DecodeStack.Setup(new MppcUnpacker());
                 }
             }
         }
     }
 }
-

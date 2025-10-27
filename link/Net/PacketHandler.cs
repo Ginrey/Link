@@ -1,7 +1,3 @@
-﻿using System;
+﻿namespace Link.Net;
 
-namespace Link.Net
-{
-    public delegate T PacketHandler<out T>(object sender, Packet packet);
-}
-
+public delegate T PacketHandler<out T>(object sender, Packet packet);

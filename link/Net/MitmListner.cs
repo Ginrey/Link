@@ -1,82 +1,78 @@
-﻿using System;
+﻿namespace Link.Net;
 
-namespace Link.Net
+public class MitmListner<T> where T : MitmPair, new()
 {
-    public class MitmListner<T> where T : MitmPair, new()
+    public IActiveConnectionFactory ActiveFactory { get; private set; }
+    public IPassiveConnectionFactory PassiveFactory { get; private set; }
+
+    public event MitmPairEventHandler<T> Accepting;
+    public event MitmPairEventHandler<T> Accepted;
+
+    public MitmListner(IActiveConnectionFactory activeFactory, IPassiveConnectionFactory passiveFactory)
     {
-        public IActiveConnectionFactory ActiveFactory { get; private set; }
-        public IPassiveConnectionFactory PassiveFactory { get; private set; }
+        ActiveFactory = activeFactory;
+        PassiveFactory = passiveFactory;
 
-        public event MitmPairEventHandler<T> Accepting;
-        public event MitmPairEventHandler<T> Accepted;
+        ActiveFactory.ConnectionAccept += ActiveFactory_ConnectionAccept;
+    }
 
-        public MitmListner(IActiveConnectionFactory activeFactory, IPassiveConnectionFactory passiveFactory)
+    private void ActiveFactory_ConnectionAccept (object sender, ConnectionEventArgs client)
+    {
+        Connection server;
+        try
         {
-            ActiveFactory = activeFactory;
-            PassiveFactory = passiveFactory;
-
-            ActiveFactory.ConnectionAccept += ActiveFactory_ConnectionAccept;
+            server = PassiveFactory.Take();
         }
-
-        private void ActiveFactory_ConnectionAccept (object sender, ConnectionEventArgs client)
+        catch
         {
-            Connection server;
-            try
-            {
-                server = PassiveFactory.Take();
-            }
-            catch
-            {
-                ActiveFactory.Free(client.Connection);
-                return;
-            }
-            ProcessConnections(client.Connection, server);
+            ActiveFactory.Free(client.Connection);
+            return;
         }
-        public void Start()
+        ProcessConnections(client.Connection, server);
+    }
+    public void Start()
+    {
+        ActiveFactory.Start();
+    }
+    public void Stop()
+    {
+        ActiveFactory.Stop();
+    }
+    protected virtual void ProcessConnections(Connection client, Connection server)
+    {
+        try
         {
-            ActiveFactory.Start();
+            var pair = MakePair();
+            ConfigurePair(pair);
+
+            pair.Client.SetupConnection(client, false);
+            pair.Server.SetupConnection(server, false);
+
+            Accepting?.Invoke(this, pair);
+
+            pair.Initialize();
+            pair.Client.Start();
+            pair.Server.Start();
+
+            Accepted?.Invoke(this, pair);
         }
-        public void Stop()
+        catch
         {
-            ActiveFactory.Stop();
-        }
-        protected virtual void ProcessConnections(Connection client, Connection server)
-        {
-            try
-            {
-                var pair = MakePair();
-                ConfigurePair(pair);
-
-                pair.Client.SetupConnection(client, false);
-                pair.Server.SetupConnection(server, false);
-
-                Accepting?.Invoke(this, pair);
-
-                pair.Initialize();
-                pair.Client.Start();
-                pair.Server.Start();
-
-                Accepted?.Invoke(this, pair);
-            }
-            catch
-            {
-                ActiveFactory.Free(client);
-                PassiveFactory.Free(server);
-            }
-        }
-        protected virtual T MakePair()
-        {
-            return new T();
-        }
-        protected virtual void ConfigurePair(T pair)
-        {
-            var clientSession = new Session();
-            var serverSession = new Session(baseProto: clientSession.Proto);
-
-            pair.Client = clientSession;
-            pair.Server = serverSession;
-            pair.Configure();
+            ActiveFactory.Free(client);
+            PassiveFactory.Free(server);
         }
     }
-}
+    protected virtual T MakePair()
+    {
+        return new T();
+    }
+    protected virtual void ConfigurePair(T pair)
+    {
+        var clientSession = new Session();
+        var serverSession = new Session(baseProto: clientSession.Proto);
 
+        pair.Client = clientSession;
+        pair.Server = serverSession;
+        pair.Configure();
+    }
+}

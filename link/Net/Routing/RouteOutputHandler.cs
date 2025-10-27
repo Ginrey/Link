@@ -1,29 +1,24 @@
-﻿using System;
-using System.Collections.Generic;
+﻿namespace Link.Net;
 
-namespace Link.Net
+public class RouteOutputHandler : Route
 {
-    public class RouteOutputHandler : Route
+    public PacketHandler<bool> OutputHandler;
+
+    public RouteOutputHandler()
     {
-        public PacketHandler<bool> OutputHandler;
-
-        public RouteOutputHandler()
-        {
             
-        }
-        public RouteOutputHandler(PacketHandler<bool> outputHandler)
-        {
-            OutputHandler = outputHandler;
-        }
+    }
+    public RouteOutputHandler(PacketHandler<bool> outputHandler)
+    {
+        OutputHandler = outputHandler;
+    }
 
-        public override bool Send(Packet packet)
-        {
-            return OutputHandler?.Invoke(this, packet) ?? false;
-        }
-        public void Clear()
-        {
-            OutputHandler = null;
-        }
+    public override bool Send(Packet packet)
+    {
+        return OutputHandler?.Invoke(this, packet) ?? false;
+    }
+    public void Clear()
+    {
+        OutputHandler = null;
     }
 }
-

@@ -1,10 +1,8 @@
-﻿namespace Link.Modules
-{
-    public enum ConnectorState
-    {
-        Disconnected,
-        Connecting,
-        Connected
-    }
-}
+﻿namespace Link.Modules;
 
+public enum ConnectorState
+{
+    Disconnected,
+    Connecting,
+    Connected
+}
