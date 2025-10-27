@@ -15,6 +15,7 @@ public class SocketConnection : Connection
 
     private IPool<SocketAsyncEventArgs> ReceivePool { get; }
     private IPool<SocketAsyncEventArgs> SendPool { get; }
+    private CancellationTokenSource? _receiveCts;
 
     public SocketConnection(Socket socket, IPool<SocketAsyncEventArgs> receivePool, IPool<SocketAsyncEventArgs> sendPool)
     {
@@ -53,13 +54,16 @@ public class SocketConnection : Connection
                 return;
             }
             State = ConnectionState.Working;
-            StartReceive();
+            _receiveCts = new CancellationTokenSource();
+            // Start async receive loop
+            _ = ReceiveLoopAsync(_receiveCts.Token);
         }
     }
     public override void Stop()
     {
         lock (lckObject)
         {
+            _receiveCts?.Cancel();
             State = ConnectionState.NotWorking;
         }
     }
@@ -67,6 +71,10 @@ public class SocketConnection : Connection
     {
         lock (lckObject)
         {
+            _receiveCts?.Cancel();
+            _receiveCts?.Dispose();
+            _receiveCts = null;
+
             try
             {
                 BaseSocket.Shutdown(SocketShutdown.Both);
@@ -82,10 +90,16 @@ public class SocketConnection : Connection
             {
             }
             State = ConnectionState.Closed;
-            SocketReceiveArgs.Completed -= socketArgsRecv_Completed;
-            SocketSendArgs.Completed -= socketArgsSend_Completed;
-            ReceivePool.Return(SocketReceiveArgs);
-            SendPool.Return(SocketSendArgs);
+            if (SocketReceiveArgs != null)
+            {
+                SocketReceiveArgs.Completed -= socketArgsRecv_Completed;
+                ReceivePool.Return(SocketReceiveArgs);
+            }
+            if (SocketSendArgs != null)
+            {
+                SocketSendArgs.Completed -= socketArgsSend_Completed;
+                SendPool.Return(SocketSendArgs);
+            }
         }
     }
     protected override bool ProcessSend(byte[] buffer, int offset, int length)
@@ -147,22 +161,53 @@ public class SocketConnection : Connection
         }
     }
 
-    private void StartReceive()
+    /// <summary>
+    /// Современный асинхронный цикл приема данных.
+    /// Заменяет старый подход на основе событий на современный async/await.
+    /// </summary>
+    private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
-        if (State != ConnectionState.Working)
+        var buffer = new byte[SocketReceiveArgs?.Buffer?.Length ?? 8192];
+        
+        while (State == ConnectionState.Working && !cancellationToken.IsCancellationRequested)
         {
-            return;
-        }
-        try
-        {
-            if (!BaseSocket.ReceiveAsync(SocketReceiveArgs))
+            try
             {
-                ReceiveProcess(SocketReceiveArgs);
+                var received = await BaseSocket.ReceiveAsync(buffer, SocketFlags.None, cancellationToken).ConfigureAwait(false);
+                
+                if (received <= 0)
+                {
+                    Close();
+                    return;
+                }
+
+#if !DEBUG
+                try
+                {
+#endif
+                    if (State != ConnectionState.Closed)
+                    {
+                        ProcessReceive(buffer.AsSpan(0, received));
+                    }
+#if !DEBUG
+                }
+                catch
+                {
+                    Close();
+                    return;
+                }
+#endif
             }
-        }
-        catch
-        {
-            Close();
+            catch (OperationCanceledException)
+            {
+                // Normal shutdown
+                return;
+            }
+            catch
+            {
+                Close();
+                return;
+            }
         }
     }
 
@@ -188,6 +233,8 @@ public class SocketConnection : Connection
             return false;
         }
     }
+
+    // Keep event-based methods for backward compatibility with SocketAsyncEventArgs
     private void socketArgsRecv_Completed(object? sender, SocketAsyncEventArgs e)
     {
         ReceiveProcess(e);
@@ -196,6 +243,7 @@ public class SocketConnection : Connection
     {
         SendProcess(e);
     }
+    
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ReceiveProcess(SocketAsyncEventArgs socketArgs)
     {
@@ -222,7 +270,6 @@ public class SocketConnection : Connection
             // Используем Span для оптимизации
             ProcessReceive(socketArgs.Buffer.AsSpan(socketArgs.Offset, socketArgs.BytesTransferred));
         }
-        StartReceive();
 #if !DEBUG
             }
             catch
