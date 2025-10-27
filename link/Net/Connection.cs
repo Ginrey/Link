@@ -43,8 +43,13 @@ public abstract class Connection
     public EncodeContainer Encoder { get; private set; }
     public EncodeContainer Decoder { get; private set; }
 
+    // Используем SemaphoreSlim только для async методов
     private readonly SemaphoreSlim _encodeSemaphore = new(1, 1);
     private readonly SemaphoreSlim _decodeSemaphore = new(1, 1);
+    
+    // Для синхронных методов используем обычные lock объекты
+    private readonly object _encodeLock = new();
+    private readonly object _decodeLock = new();
 
     public Connection()
     {
@@ -74,8 +79,7 @@ public abstract class Connection
 
     public virtual bool Send(byte[] buffer, int offset, int length)
     {
-        _encodeSemaphore.Wait();
-        try
+        lock (_encodeLock)
         {
             Encoder.Reset();
             Encoder.Encode(buffer, offset, length);
@@ -83,10 +87,6 @@ public abstract class Connection
             var memory = Encoder.OutputStream.AsMemory();
             
             return ProcessSendAsync(memory).GetAwaiter().GetResult();
-        }
-        finally
-        {
-            _encodeSemaphore.Release();
         }
     }
 
@@ -96,18 +96,13 @@ public abstract class Connection
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual bool Send(ReadOnlySpan<byte> data)
     {
-        _encodeSemaphore.Wait();
-        try
+        lock (_encodeLock)
         {
             Encoder.Reset();
             Encoder.OutputStream.Clear();
             Encoder.OutputStream.PushBack(data);
             var memory = Encoder.OutputStream.AsMemory();
             return ProcessSendAsync(memory).GetAwaiter().GetResult();
-        }
-        finally
-        {
-            _encodeSemaphore.Release();
         }
     }
 
@@ -164,13 +159,16 @@ public abstract class Connection
     [Obsolete("Use ProcessSendAsync instead for better async performance")]
     protected virtual bool ProcessSend(byte[] buffer, int offset, int length)
     {
-        return ProcessSendAsync(new ReadOnlyMemory<byte>(buffer, offset, length)).GetAwaiter().GetResult();
+        // Используем lock для синхронной версии
+        lock (_encodeLock)
+        {
+            return ProcessSendAsync(new ReadOnlyMemory<byte>(buffer, offset, length)).GetAwaiter().GetResult();
+        }
     }
         
     protected virtual void ProcessReceive(byte[] buffer, int offset, int length)
     {
-        _decodeSemaphore.Wait();
-        try
+        lock (_decodeLock)
         {
             Decoder.Reset();
             Decoder.Encode(buffer, offset, length);
@@ -182,10 +180,6 @@ public abstract class Connection
             DataReceived?.Invoke(this, resultBuffer, resultOffset, resultLength);
             _ = _dataReceivedChannel.Writer.TryWrite((resultBuffer, resultOffset, resultLength));
         }
-        finally
-        {
-            _decodeSemaphore.Release();
-        }
     }
 
     /// <summary>
@@ -194,8 +188,7 @@ public abstract class Connection
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected virtual void ProcessReceive(ReadOnlySpan<byte> data)
     {
-        _decodeSemaphore.Wait();
-        try
+        lock (_decodeLock)
         {
             Decoder.Reset();
             Decoder.OutputStream.Clear();
@@ -208,10 +201,6 @@ public abstract class Connection
             // Поддерживаем оба подхода: события и каналы
             DataReceived?.Invoke(this, resultBuffer, resultOffset, resultLength);
             _ = _dataReceivedChannel.Writer.TryWrite((resultBuffer, resultOffset, resultLength));
-        }
-        finally
-        {
-            _decodeSemaphore.Release();
         }
     }
 

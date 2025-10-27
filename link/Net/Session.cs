@@ -48,7 +48,7 @@ public class Session
     public ModulesManager Modules { get; private set; }
 
     private readonly SemaphoreSlim _connectionSemaphore = new(1, 1);
-    private readonly SemaphoreSlim _packetWriterSemaphore = new(1, 1);
+    private readonly object _packetWriterLock = new(); // Заменяем SemaphoreSlim на lock для синхронных операций
     private CancellationTokenSource? _dataReceiverCts;
 
     public Session(
@@ -135,7 +135,8 @@ public class Session
 
     public void SetupConnection(Connection connection, bool start = true)
     {
-        SetupConnectionAsync(connection, start).GetAwaiter().GetResult();
+        // Синхронная обертка - просто вызываем async версию и ждем
+        Task.Run(() => SetupConnectionAsync(connection, start)).GetAwaiter().GetResult();
     }
 
     public virtual void Start()
@@ -252,44 +253,46 @@ public class Session
     }
     private async Task<bool> SendNextAsync(object? sender, Packet packet)
     {
-        await _packetWriterSemaphore.WaitAsync().ConfigureAwait(false);
-        try
+        lock (_packetWriterLock) // Используем lock вместо semaphore для коротких синхронных операций
         {
             PacketWriter.Clear();
             PacketWriter.Write(packet);
 
             return Send(PacketWriter);
         }
-        finally
-        {
-            _packetWriterSemaphore.Release();
-        }
     }
 
     private bool SendNext(object? sender, Packet packet)
     {
-        return SendNextAsync(sender, packet).GetAwaiter().GetResult();
+        lock (_packetWriterLock)
+        {
+            PacketWriter.Clear();
+            PacketWriter.Write(packet);
+
+            return Send(PacketWriter);
+        }
     }
 
     public async Task<bool> SendNextAsync(params Packet[] packets)
     {
-        await _packetWriterSemaphore.WaitAsync().ConfigureAwait(false);
-        try
+        lock (_packetWriterLock)
         {
             PacketWriter.Clear();
             foreach (var packet in packets)
                 PacketWriter.Write(packet);
             return Send(PacketWriter);
         }
-        finally
-        {
-            _packetWriterSemaphore.Release();
-        }
     }
 
     public bool SendNext(params Packet[] packets)
     {
-        return SendNextAsync(packets).GetAwaiter().GetResult();
+        lock (_packetWriterLock)
+        {
+            PacketWriter.Clear();
+            foreach (var packet in packets)
+                PacketWriter.Write(packet);
+            return Send(PacketWriter);
+        }
     }
 
 
@@ -358,20 +361,18 @@ public class Session
 
     private async Task<bool> CheckConnectionAsync(Connection connection)
     {
-        // await _connectionSemaphore.WaitAsync().ConfigureAwait(false);
         try
         {
             return ReferenceEquals(connection, Connection);
         }
         finally
         {
-            // _connectionSemaphore.Release();
         }
     }
 
     private bool CheckConnection(Connection connection)
     {
-        return CheckConnectionAsync(connection).GetAwaiter().GetResult();
+        return ReferenceEquals(connection, Connection);
     }
 
     private void ProcessReceivedPacket(Packet packet)

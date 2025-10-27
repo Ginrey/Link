@@ -18,7 +18,6 @@ public class SocketConnection : Connection
     private IPool<SocketAsyncEventArgs> ReceivePool { get; }
     private IPool<SocketAsyncEventArgs> SendPool { get; }
     private CancellationTokenSource? _receiveCts;
-    private readonly SemaphoreSlim _stateSemaphore = new(1, 1);
 
     public SocketConnection(Socket socket, IPool<SocketAsyncEventArgs> receivePool, IPool<SocketAsyncEventArgs> sendPool)
     {
@@ -47,6 +46,7 @@ public class SocketConnection : Connection
     }
 
     private readonly object lckObject = new();
+    private readonly ManualResetEventSlim _stateChanging = new(true); // Заменяем SemaphoreSlim на ManualResetEventSlim для лучшей производительности
     
     // Modern Pipe-based receive (zero-copy, high performance)
     private Pipe? _receivePipe;
@@ -67,7 +67,8 @@ public class SocketConnection : Connection
 
     public override async Task Start()
     {
-        await _stateSemaphore.WaitAsync().ConfigureAwait(false);
+        _stateChanging.Wait(); // Ждем завершения любых предыдущих операций изменения состояния
+        _stateChanging.Reset(); // Блокируем новые операции
         
         try
         {
@@ -90,13 +91,14 @@ public class SocketConnection : Connection
         }
         finally
         {
-            _stateSemaphore.Release();
+            _stateChanging.Set(); // Разрешаем новые операции
         }
     }
 
     public override async Task Stop()
     {
-        await _stateSemaphore.WaitAsync().ConfigureAwait(false);
+        _stateChanging.Wait();
+        _stateChanging.Reset();
         try
         {
             await _receiveCts?.CancelAsync();
@@ -104,13 +106,14 @@ public class SocketConnection : Connection
         }
         finally
         {
-            _stateSemaphore.Release();
+            _stateChanging.Set();
         }
     }
 
     public override async Task Close()
     {
-        await _stateSemaphore.WaitAsync().ConfigureAwait(false);
+        _stateChanging.Wait();
+        _stateChanging.Reset();
         try
         {
             await _receiveCts?.CancelAsync();
@@ -145,7 +148,7 @@ public class SocketConnection : Connection
         }
         finally
         {
-            _stateSemaphore.Release();
+            _stateChanging.Set();
         }
     }
 

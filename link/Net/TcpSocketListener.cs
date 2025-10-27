@@ -11,7 +11,7 @@ public class TcpSocketListener : IActiveConnectionFactory
 {
     public event ConnectionEventHandler? ConnectionAccept;
 
-    private readonly SemaphoreSlim _startSemaphore = new(1, 1);
+    private readonly ManualResetEventSlim _startEvent = new(true); // Заменяем SemaphoreSlim на ManualResetEventSlim
 
     public int BackLog { get; set; }
 
@@ -38,9 +38,10 @@ public class TcpSocketListener : IActiveConnectionFactory
     {
     }
 
-    public virtual async void Start()
+    public virtual void Start()
     {
-        await _startSemaphore.WaitAsync().ConfigureAwait(false);
+        _startEvent.Wait(); // Ждем завершения предыдущих операций
+        _startEvent.Reset(); // Блокируем параллельные операции
         try
         {
             if (Started)
@@ -56,13 +57,14 @@ public class TcpSocketListener : IActiveConnectionFactory
         }
         finally
         {
-            _startSemaphore.Release();
+            _startEvent.Set(); // Разрешаем новые операции
         }
     }
 
-    public virtual async void Stop()
+    public virtual void Stop()
     {
-        await _startSemaphore.WaitAsync().ConfigureAwait(false);
+        _startEvent.Wait();
+        _startEvent.Reset();
         try
         {
             if (!Started)
@@ -74,7 +76,7 @@ public class TcpSocketListener : IActiveConnectionFactory
         }
         finally
         {
-            _startSemaphore.Release();
+            _startEvent.Set();
         }
     }
 
