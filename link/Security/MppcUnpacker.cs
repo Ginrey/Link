@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Link.IO;
 
-namespace Link.Security
-{
-    public class MppcUnpacker : StreamEncoder
+namespace Link.Security;
+
+public sealed class MppcUnpacker : StreamEncoder
     {
         private int code1;
         private int code2;
@@ -255,4 +255,3 @@ namespace Link.Security
             return (packedBytes.Count * 8 - packedOffset) >= count;
         }
     }
-}

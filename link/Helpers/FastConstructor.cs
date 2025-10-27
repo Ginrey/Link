@@ -1,104 +1,99 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Link.Helpers
+namespace Link.Helpers;
+
+public static class FastConstructor<TRes>
 {
-    public static class FastConstructor<TRes>
+    public static readonly bool Exists;
+    public static readonly Func<TRes?> Create;
+
+    static FastConstructor()
     {
-        public static readonly bool Exists;
-        public static readonly Func<TRes> Create;
-        static FastConstructor()
+        try
         {
-            try
-            {
-                Create = Expression.Lambda<Func<TRes>>(
-                    Expression.MemberInit(
-                        Expression.New(
-                            typeof(TRes)
-                        )
-                    )).Compile();
-                Exists = true;
-            }
-            catch
-            {
-                Create = () => default(TRes);
-            }
+            Create = Expression.Lambda<Func<TRes?>>(
+                Expression.MemberInit(
+                    Expression.New(typeof(TRes))
+                )).Compile();
+            Exists = true;
+        }
+        catch
+        {
+            Create = () => default;
         }
     }
-    public static class FastConstructor<TArg1, TRes>
+}
+
+public static class FastConstructor<TArg1, TRes>
+{
+    public static readonly bool Exists;
+    public static readonly Func<TArg1, TRes?> Create;
+
+    static FastConstructor()
     {
-        public static readonly bool Exists;
-        public static readonly Func<TArg1, TRes> Create;
-        static FastConstructor()
+        try
         {
-            try
-            {
-                Create = Expression.Lambda<Func<TArg1, TRes>>(
-                    Expression.MemberInit(
-                        Expression.New(
-                            typeof(TRes)
-                        )
-                    ),
-                    new[] { typeof(TArg1) }.Select(Expression.Parameter)
-                    ).Compile();
-                Exists = true;
-            }
-            catch
-            {
-                Create = (a1) => default(TRes);
-            }
+            Create = Expression.Lambda<Func<TArg1, TRes?>>(
+                Expression.MemberInit(
+                    Expression.New(typeof(TRes))
+                ),
+                new[] { typeof(TArg1) }.Select(Expression.Parameter)
+            ).Compile();
+            Exists = true;
+        }
+        catch
+        {
+            Create = (a1) => default;
         }
     }
-    public static class FastConstructor<TArg1, TArg2, TRes>
+}
+
+public static class FastConstructor<TArg1, TArg2, TRes>
+{
+    public static readonly bool Exists;
+    public static readonly Func<TArg1, TArg2, TRes?> Create;
+
+    static FastConstructor()
     {
-        public static readonly bool Exists;
-        public static readonly Func<TArg1, TArg2, TRes> Create;
-        static FastConstructor()
+        try
         {
-            try
-            {
-                Create = Expression.Lambda<Func<TArg1, TArg2, TRes>>(
-                    Expression.MemberInit(
-                        Expression.New(
-                            typeof(TRes)
-                        )
-                    ),
-                    new[] { typeof(TArg1), typeof(TArg2) }.Select(Expression.Parameter)
-                    ).Compile();
-                Exists = true;
-            }
-            catch
-            {
-                Create = (a1, a2) => default(TRes);
-            }
+            Create = Expression.Lambda<Func<TArg1, TArg2, TRes?>>(
+                Expression.MemberInit(
+                    Expression.New(typeof(TRes))
+                ),
+                new[] { typeof(TArg1), typeof(TArg2) }.Select(Expression.Parameter)
+            ).Compile();
+            Exists = true;
+        }
+        catch
+        {
+            Create = (a1, a2) => default;
         }
     }
-    public static class FastConstructor<TArg1, TArg2, TArg3, TRes>
+}
+
+public static class FastConstructor<TArg1, TArg2, TArg3, TRes>
+{
+    public static readonly bool Exists;
+    public static readonly Func<TArg1, TArg2, TArg3, TRes?> Create;
+
+    static FastConstructor()
     {
-        public static readonly bool Exists;
-        public static readonly Func<TArg1, TArg2, TArg3, TRes> Create;
-        static FastConstructor()
+        try
         {
-            try
-            {
-                Create = Expression.Lambda<Func<TArg1, TArg2, TArg3, TRes>>(
-                    Expression.MemberInit(
-                        Expression.New(
-                            typeof(TRes)
-                        )
-                    ),
-                    new[] { typeof(TArg1), typeof(TArg2), typeof(TArg3) }.Select(Expression.Parameter)
-                    ).Compile();
-                Exists = true;
-            }
-            catch
-            {
-                Create = (a1, a2, a3) => default(TRes);
-            }
+            Create = Expression.Lambda<Func<TArg1, TArg2, TArg3, TRes?>>(
+                Expression.MemberInit(
+                    Expression.New(typeof(TRes))
+                ),
+                new[] { typeof(TArg1), typeof(TArg2), typeof(TArg3) }.Select(Expression.Parameter)
+            ).Compile();
+            Exists = true;
+        }
+        catch
+        {
+            Create = (a1, a2, a3) => default;
         }
     }
 }
