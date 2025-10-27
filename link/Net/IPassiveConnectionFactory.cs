@@ -1,11 +1,13 @@
-﻿using System;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 
-namespace Link.Net
+namespace Link.Net;
+
+public interface IPassiveConnectionFactory
 {
-    public interface IPassiveConnectionFactory
-    {
-        Connection Take();
-        void Free(Connection connection);
-    }
+    Connection Take();
+    Task<Connection> TakeAsync(CancellationToken cancellationToken = default);
+    void Free(Connection? connection);
 }
 

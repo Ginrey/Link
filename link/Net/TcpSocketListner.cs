@@ -64,9 +64,49 @@ public class TcpSocketListner : IActiveConnectionFactory
         }
     }
 
+    public virtual async Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        await _startLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (Started)
+            {
+                return;
+            }
+            BaseSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            BaseSocket.Bind(LocalEndPoint);
+            BaseSocket.Listen(BackLog);
+
+            Started = true;
+            BeginAccept(BaseSocket);
+        }
+        finally
+        {
+            _startLock.Release();
+        }
+    }
+
     public virtual void Stop()
     {
         _startLock.Wait();
+        try
+        {
+            if (!Started)
+            {
+                return;
+            }
+            DisposeSocket(BaseSocket);
+            Started = false;
+        }
+        finally
+        {
+            _startLock.Release();
+        }
+    }
+
+    public virtual async Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        await _startLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (!Started)

@@ -1,14 +1,17 @@
-﻿using System;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 
-namespace Link.Net
+namespace Link.Net;
+
+public interface IActiveConnectionFactory
 {
-    public interface IActiveConnectionFactory
-    {
-        event ConnectionEventHandler ConnectionAccept;
-        bool Started { get; }
-        void Start();
-        void Stop();
-        void Free(Connection connection);
-    }
+    event ConnectionEventHandler? ConnectionAccept;
+    bool Started { get; }
+    void Start();
+    Task StartAsync(CancellationToken cancellationToken = default);
+    void Stop();
+    Task StopAsync(CancellationToken cancellationToken = default);
+    void Free(Connection? connection);
 }
 
