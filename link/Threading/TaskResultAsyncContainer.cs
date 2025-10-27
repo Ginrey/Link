@@ -6,33 +6,55 @@ using System.Threading.Tasks;
 
 namespace Link.Threading
 {
-    class TaskResultAsyncContainer<T> : IAsyncResult
+    /// <summary>
+    /// Модернизированный контейнер для асинхронных результатов с использованием TaskCompletionSource.
+    /// </summary>
+    internal class TaskResultAsyncContainer<T> : IAsyncResult
     {
-        public ManualResetEventSlim ResetEvent { get; } = new ManualResetEventSlim(false);
-        public T Result { get; private set; }
-        public Task<T> ResultTask { get; private set; }
+        private readonly TaskCompletionSource<T> tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly ManualResetEventSlim resetEvent = new ManualResetEventSlim(false);
+
+        public T? Result { get; private set; }
+        public Task<T> ResultTask => tcs.Task;
 
         public TaskResultAsyncContainer()
         {
-            ResultTask = Task.Factory.FromAsync(this, ResultMethod);
         }
 
+        /// <summary>
+        /// Устанавливает результат и завершает операцию.
+        /// </summary>
         public void SetResult(T result)
         {
             Result = result;
-            ResetEvent.Set();
+            resetEvent.Set();
+            tcs.TrySetResult(result);
         }
-        private T ResultMethod(IAsyncResult e)
+
+        /// <summary>
+        /// Устанавливает исключение и завершает операцию.
+        /// </summary>
+        public void SetException(Exception exception)
         {
-            return Result;
+            resetEvent.Set();
+            tcs.TrySetException(exception);
         }
 
-        public object AsyncState => null;
+        /// <summary>
+        /// Отменяет операцию.
+        /// </summary>
+        public void SetCanceled()
+        {
+            resetEvent.Set();
+            tcs.TrySetCanceled();
+        }
 
-        public WaitHandle AsyncWaitHandle => ResetEvent.WaitHandle;
+        public object? AsyncState => null;
+
+        public WaitHandle AsyncWaitHandle => resetEvent.WaitHandle;
 
         public bool CompletedSynchronously => false;
 
-        public bool IsCompleted => ResetEvent.IsSet;
+        public bool IsCompleted => resetEvent.IsSet;
     }
 }
