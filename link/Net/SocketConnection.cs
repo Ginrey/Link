@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Buffers;
+using System.IO.Pipelines;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -45,6 +47,23 @@ public class SocketConnection : Connection
     }
 
     private readonly object lckObject = new();
+    
+    // Modern Pipe-based receive (zero-copy, high performance)
+    private Pipe? _receivePipe;
+    private Task? _fillPipeTask;
+    private Task? _processPipeTask;
+    private bool _usePipelineMode = true; // По умолчанию используем Pipes
+
+    /// <summary>
+    /// Включить/выключить режим System.IO.Pipelines для приема данных.
+    /// true = PipeReader (zero-copy, высокая производительность)
+    /// false = традиционный byte[] буфер (обратная совместимость)
+    /// </summary>
+    public bool UsePipelineMode
+    {
+        get => _usePipelineMode;
+        set => _usePipelineMode = value;
+    }
 
     public override async void Start()
     {
@@ -57,8 +76,25 @@ public class SocketConnection : Connection
             }
             State = ConnectionState.Working;
             _receiveCts = new CancellationTokenSource();
-            // Start async receive loop
-            _ = ReceiveLoopAsync(_receiveCts.Token);
+
+            if (_usePipelineMode)
+            {
+                // Modern Pipe-based receive (recommended)
+                _receivePipe = new Pipe(new PipeOptions(
+                    pool: MemoryPool<byte>.Shared,
+                    pauseWriterThreshold: 1024 * 1024,  // 1MB backpressure
+                    resumeWriterThreshold: 512 * 1024,   // 512KB resume
+                    useSynchronizationContext: false
+                ));
+
+                _fillPipeTask = FillPipeAsync(_receivePipe.Writer, _receiveCts.Token);
+                _processPipeTask = ProcessPipeAsync(_receivePipe.Reader, _receiveCts.Token);
+            }
+            else
+            {
+                // Legacy receive loop (backward compatibility)
+                _ = ReceiveLoopAsync(_receiveCts.Token);
+            }
         }
         finally
         {
@@ -209,9 +245,157 @@ public class SocketConnection : Connection
     }
 
     /// <summary>
-    /// Современный асинхронный цикл приема данных.
-    /// Заменяет старый подход на основе событий на современный async/await.
+    /// Modern Pipe-based receive: fills the pipe from the socket (zero-copy).
+    /// Provides automatic backpressure and buffer pooling.
     /// </summary>
+    private async Task FillPipeAsync(PipeWriter writer, CancellationToken cancellationToken)
+    {
+        const int minimumBufferSize = 8192;
+
+        try
+        {
+            while (State == ConnectionState.Working && !cancellationToken.IsCancellationRequested)
+            {
+                // Get memory from pipe's buffer (zero allocation, uses MemoryPool)
+                Memory<byte> memory = writer.GetMemory(minimumBufferSize);
+
+                try
+                {
+                    int bytesRead = await BaseSocket.ReceiveAsync(memory, SocketFlags.None, cancellationToken).ConfigureAwait(false);
+
+                    if (bytesRead == 0)
+                    {
+                        break; // Connection closed
+                    }
+
+                    // Tell the PipeWriter how much was written
+                    writer.Advance(bytesRead);
+                }
+                catch (OperationCanceledException)
+                {
+                    break; // Normal shutdown
+                }
+                catch
+                {
+                    break; // Error - exit loop
+                }
+
+                // Make the data available to the PipeReader
+                FlushResult result = await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+
+                if (result.IsCompleted)
+                {
+                    break; // Reader completed
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal cancellation
+        }
+        catch
+        {
+            // Error occurred
+        }
+        finally
+        {
+            // Complete the PipeWriter to signal the reader
+            await writer.CompleteAsync().ConfigureAwait(false);
+            
+            if (State == ConnectionState.Working)
+            {
+                Close();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Modern Pipe-based receive: processes data from the pipe.
+    /// Provides zero-copy data access via ReadOnlySequence.
+    /// </summary>
+    private async Task ProcessPipeAsync(PipeReader reader, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (State == ConnectionState.Working && !cancellationToken.IsCancellationRequested)
+            {
+                ReadResult result = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+                ReadOnlySequence<byte> buffer = result.Buffer;
+
+                try
+                {
+                    // Process the data
+                    if (buffer.Length > 0)
+                    {
+                        ProcessPipeBuffer(buffer);
+                    }
+
+                    // Tell the PipeReader how much was consumed
+                    reader.AdvanceTo(buffer.End);
+                }
+                catch
+                {
+                    // Error processing - still need to advance
+                    reader.AdvanceTo(buffer.End);
+                    throw;
+                }
+
+                if (result.IsCompleted)
+                {
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal cancellation
+        }
+        catch
+        {
+            // Error occurred
+        }
+        finally
+        {
+            await reader.CompleteAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Process data from ReadOnlySequence (handles both single and multi-segment buffers).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ProcessPipeBuffer(ReadOnlySequence<byte> buffer)
+    {
+        if (buffer.IsSingleSegment)
+        {
+            // Fast path: single contiguous buffer
+            ProcessReceive(buffer.FirstSpan);
+        }
+        else
+        {
+            // Multi-segment buffer: process each segment or copy to array
+            // For simplicity, copy to array. For max performance, could process segments individually.
+            if (buffer.Length <= 81920) // 80KB threshold for stackalloc
+            {
+                Span<byte> tempBuffer = stackalloc byte[(int)buffer.Length];
+                buffer.CopyTo(tempBuffer);
+                ProcessReceive(tempBuffer);
+            }
+            else
+            {
+                // Large buffer: use array
+                byte[] tempArray = buffer.ToArray();
+                ProcessReceive(tempArray.AsSpan());
+            }
+        }
+    }
+
+    /// <summary>
+    /// Устаревший асинхронный цикл приема данных.
+    /// Используется только если UsePipelineMode = false.
+    /// Для максимальной производительности используйте режим Pipes (по умолчанию).
+    /// </summary>
+    [Obsolete("Use Pipe-based receive (UsePipelineMode = true) for better performance")]
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
         var buffer = new byte[SocketReceiveArgs?.Buffer?.Length ?? 8192];
