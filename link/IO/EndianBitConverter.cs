@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 
-namespace Link.IO
-{
-    /// <summary>
-    /// Equivalent of System.BitConverter, but with either endianness.
-    /// </summary>
-    public abstract class EndianBitConverter
+namespace Link.IO;
+
+/// <summary>
+/// Equivalent of System.BitConverter, but with either endianness.
+/// </summary>
+public abstract class EndianBitConverter
     {
         #region Endianness of this converter
 
@@ -261,6 +261,14 @@ namespace Link.IO
         /// <param name="bytesToConvert">The number of bytes to use in the conversion</param>
         /// <returns>The converted number</returns>
         protected abstract long FromBytes(byte[] value, int startIndex, int bytesToConvert);
+
+        /// <summary>
+        /// Returns an arbitrary value built from a span of bytes.
+        /// </summary>
+        /// <param name="value">The bytes to convert</param>
+        /// <param name="bytesToConvert">The number of bytes to use in the conversion</param>
+        /// <returns>The converted number</returns>
+        protected abstract long FromBytes(ReadOnlySpan<byte> value, int bytesToConvert);
 
         #endregion
 
@@ -549,6 +557,14 @@ namespace Link.IO
         protected abstract void CopyBytesImpl(long value, int bytes, byte[] buffer, int index);
 
         /// <summary>
+        /// Copies the given number of bytes from the least-specific end of the specified value into the specified span.
+        /// </summary>
+        /// <param name="value">The value to copy bytes for</param>
+        /// <param name="bytes">The number of significant bytes to copy</param>
+        /// <param name="buffer">The byte span to copy the bytes into</param>
+        protected abstract void CopyBytesImpl(long value, int bytes, Span<byte> buffer);
+
+        /// <summary>
         /// Copies the specified Boolean value into the specified byte array,
         /// beginning at the specified index.
         /// </summary>
@@ -670,4 +686,3 @@ namespace Link.IO
 
         #endregion
     }
-}

@@ -1,10 +1,7 @@
-﻿using Link.Net;
+namespace Link.IO;
 
-namespace Link.IO
+public interface IDataSerializer
 {
-    public interface IDataSerializer
-    {
-        bool TryDeserialize(DataStream ds);
-        DataStream Serialize(DataStream ds);
-    }
+    bool TryDeserialize(DataStream ds);
+    DataStream Serialize(DataStream ds);
 }
