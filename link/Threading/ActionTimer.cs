@@ -1,30 +1,40 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System;
 using System.Threading;
 
-namespace Link.Threading
+namespace Link.Threading;
+
+public sealed class ActionTimer : IDisposable
 {
-    public class ActionTimer
+    private readonly Timer _timer;
+    private bool _disposed;
+
+    public ActionTimer(TimerCallback callBack) : this(callBack, null)
     {
-        private Timer timer;
+    }
 
-        public ActionTimer(TimerCallback callBack) : this(callBack, null)
-        {
-        }
-        public ActionTimer(TimerCallback callBack, object state)
-        {
-            timer = new Timer(callBack, state, Timeout.Infinite, Timeout.Infinite);
-        }
+    public ActionTimer(TimerCallback callBack, object? state)
+    {
+        _timer = new Timer(callBack, state, Timeout.Infinite, Timeout.Infinite);
+    }
 
-        public void Start(int dueTime, int period)
+    public void Start(int dueTime, int period)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _timer.Change(dueTime, period);
+    }
+
+    public void Stop()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _timer.Change(Timeout.Infinite, Timeout.Infinite);
+    }
+
+    public void Dispose()
+    {
+        if (!_disposed)
         {
-            timer.Change(dueTime, period);
-        }
-        public void Stop()
-        {
-            timer.Change(Timeout.Infinite, Timeout.Infinite);
+            _disposed = true;
+            _timer.Dispose();
         }
     }
 }

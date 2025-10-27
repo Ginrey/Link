@@ -1,124 +1,97 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Text;
 using Link.Threading;
 
-namespace Link.Net
+namespace Link.Net;
+
+public class MitmManager<T> : IMitmManager<T> where T : MitmPair, new()
 {
-    public class MitmManager<T> : IMitmManager<T> where T : MitmPair, new()
+    protected ConcurentSet<MitmListner<T>> listners = new();
+    protected ConcurentSet<T> sessions = new();
+
+    public IEnumerable<T> Sessions => sessions.Items;
+
+    public IEnumerable<MitmListner<T>> Listners => listners.Items;
+
+    public event MitmPairEventHandler<T>? Accepting;
+    public event MitmPairEventHandler<T>? Accepted;
+    public event MitmPairEventHandler<T>? Closing;
+    public event MitmPairEventHandler<T>? Closed;
+
+    public void AddListner(MitmListner<T> listner)
     {
-        protected ConcurentSet<MitmListner<T>> listners = new ConcurentSet<MitmListner<T>>();
-        protected ConcurentSet<T> sessions = new ConcurentSet<T>();
-
-        public IEnumerable<T> Sessions
+        if (!listners.Add(listner))
         {
-            get
+            return;
+        }
+        listner.Accepted += Listner_MitmPairAccepted;
+        listner.Accepting += Listner_MitmPairAccepting;
+    }
+
+    public void RemoveListner(MitmListner<T> listner)
+    {
+        if (!listners.Remove(listner))
+        {
+            return;
+        }
+        listner.Accepted -= Listner_MitmPairAccepted;
+        listner.Accepting -= Listner_MitmPairAccepting;
+    }
+
+    private void Listner_MitmPairAccepting(object? sender, T pair)
+    {
+        pair.Closing += Pair_Closing;
+        pair.Closed += Pair_Closed;
+
+        Accepting?.Invoke(this, pair);
+    }
+
+    private void Listner_MitmPairAccepted(object? sender, T pair)
+    {
+        sessions.Add(pair);
+        Accepted?.Invoke(this, pair);
+    }
+
+    private void Pair_Closing(object? sender, EventArgs e)
+    {
+        var pair = (T)sender!;
+        Closing?.Invoke(this, pair);
+    }
+
+    private void Pair_Closed(object? sender, EventArgs e)
+    {
+        var pair = (T)sender!;
+        sessions.Remove(pair);
+        Closed?.Invoke(this, pair);
+    }
+
+    public void StartAll()
+    {
+        foreach (var listner in listners.ToArray())
+        {
+            if (!listner.ActiveFactory.Started)
             {
-                foreach (var item in sessions)
-                {
-                    yield return item;
-                }
+                listner.Start();
             }
         }
+    }
 
-        public IEnumerable<MitmListner<T>> Listners
+    public void StopAll()
+    {
+        foreach (var listner in listners.ToArray())
         {
-            get
+            if (listner.ActiveFactory.Started)
             {
-                foreach (var item in listners)
-                {
-                    yield return item;
-                }
+                listner.Stop();
             }
         }
-        
-        public event MitmPairEventHandler<T> Accepting;
-        public event MitmPairEventHandler<T> Accepted;
-        public event MitmPairEventHandler<T> Closing;
-        public event MitmPairEventHandler<T> Closed;
+    }
 
-        public void AddListner(MitmListner<T> listner)
+    public void DisconectAll()
+    {
+        foreach (var session in sessions.ToArray())
         {
-            if (!listners.Add(listner))
-            {
-                return;
-            }
-            listner.Accepted += Listner_MitmPairAccepted;
-            listner.Accepting += Listner_MitmPairAccepting;
-        }
-        public void RemoveListner(MitmListner<T> listner)
-        {
-            if (!listners.Remove(listner))
-            {
-                return;
-            }
-            listner.Accepted -= Listner_MitmPairAccepted;
-            listner.Accepting -= Listner_MitmPairAccepting;
-        }
-
-        private void Listner_MitmPairAccepting(object sender, T pair)
-        {
-            pair.Closing += Pair_Closing;
-            pair.Closed += Pair_Closed;
-
-            Accepting?.Invoke(this, pair);
-        }
-
-        private void Listner_MitmPairAccepted(object sender, T pair)
-        {
-            sessions.Add(pair);
-            Accepted?.Invoke(this, pair);
-        }
-
-        private void Pair_Closing(object sender, EventArgs e)
-        {
-            var pair = (T)sender;
-            Closing?.Invoke(this, pair);
-        }
-
-        private void Pair_Closed(object sender, EventArgs e)
-        {
-            var pair = (T)sender;
-            sessions.Remove(pair);
-            Closed?.Invoke(this, pair);
-        }
-
-        public void StartAll()
-        {
-            lock (listners.Lock)
-            {
-                foreach (var listner in listners)
-                {
-                    if (!listner.ActiveFactory.Started)
-                    {
-                        listner.Start();
-                    }
-                }
-            }
-        }
-
-        public void StopAll()
-        {
-            lock (listners.Lock)
-            {
-                foreach (var listner in listners)
-                {
-                    if (listner.ActiveFactory.Started)
-                    {
-                        listner.Stop();
-                    }
-                }
-            }
-        }
-        public void DisconectAll()
-        {
-            lock (sessions.Lock)
-            {
-                foreach (var session in sessions)
-                {
-                    session.Close();
-                }
-            }
+            session.Close();
         }
     }
 }

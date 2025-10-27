@@ -1,99 +1,81 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
+using System.Collections.Concurrent;
 
-namespace Link.Pools
+namespace Link.Pools;
+
+public abstract class StackPool<T> : IPool<T>
 {
-    public abstract class StackPool<T> : IPool<T>
+    private readonly ConcurrentStack<T> _freeItems = new();
+
+    public int AllocateDefaultCount { get; set; }
+    public int MaxFreeCount { get; set; }
+
+    public int Count => _freeItems.Count;
+
+    protected StackPool(int maxFreeCount = 1024, int allocateDefaultCount = 16)
     {
-        public int AllocateDefaultCount { get; set; }
-        public int MaxFreeCount { get; set; }
-        public Stack<T> FreeItems { get; private set; }
+        MaxFreeCount = maxFreeCount;
+        AllocateDefaultCount = allocateDefaultCount;
+    }
 
-        public StackPool(int maxFreeCount = 1024, int allocateDefaultCount = 16)
+    public virtual T Take()
+    {
+        if (!_freeItems.TryPop(out var item))
         {
-            MaxFreeCount = maxFreeCount;
-            AllocateDefaultCount = allocateDefaultCount;
-            FreeItems = new Stack<T>();
+            if (MaxFreeCount == 0 || AllocateDefaultCount == 0)
+            {
+                return Create();
+            }
+            Allocate();
+            _freeItems.TryPop(out item);
+        }
+        return item!;
+    }
+
+    public bool Return(T item) => Return(item, false);
+
+    public virtual bool Return(T item, bool force)
+    {
+        Reset(item);
+
+        if (_freeItems.Count < MaxFreeCount || force)
+        {
+            _freeItems.Push(item);
+            return true;
         }
 
-        public object LockObject
-        {
-            get
-            {
-                return FreeItems;
-            }
-        }
-        public int Count
-        {
-            get
-            {
-                return FreeItems.Count;
-            }
-        }
+        Cleanup(item);
+        return false;
+    }
 
-        public virtual T Take()
+    public abstract T Create();
+
+    public virtual void Clear()
+    {
+        while (_freeItems.TryPop(out var item))
         {
-            lock (LockObject)
-            {
-                if (FreeItems.Count == 0)
-                {
-                    if (MaxFreeCount == 0 || AllocateDefaultCount == 0)
-                    {
-                        return Create();
-                    }
-                    Allocate();
-                }
-                return FreeItems.Pop();
-            }
+            Cleanup(item);
         }
-        public bool Return(T item)
+    }
+
+    public virtual void Reset(T item)
+    {
+    }
+
+    public virtual void Cleanup(T item)
+    {
+    }
+
+    public void Allocate()
+    {
+        Allocate(AllocateDefaultCount <= 0 ? 1 : AllocateDefaultCount);
+    }
+
+    public virtual void Allocate(int count)
+    {
+        while (count-- > 0)
         {
-            return Return(item, false);
-        }
-        public virtual bool Return(T item, bool force)
-        {
-            Reset(item);
-            lock (LockObject)
-            {
-                if (FreeItems.Count < MaxFreeCount || force)
-                {
-                    FreeItems.Push(item);
-                    return true;
-                }
-                else
-                {
-                    Cleanup(item);
-                    return false;
-                }
-            }
-        }
-        public abstract T Create();
-        public virtual void Clear()
-        {
-            lock (LockObject)
-            {
-                while (FreeItems.Count > 0)
-                {
-                    Cleanup(FreeItems.Pop());
-                }
-            }
-        }
-        public virtual void Reset(T item)
-        {
-        }
-        public virtual void Cleanup(T item)
-        {
-        }
-        public void Allocate()
-        {
-            Allocate(AllocateDefaultCount <= 0 ? 1 : AllocateDefaultCount);
-        }
-        public virtual void Allocate(int count)
-        {
-            while (count-- > 0)
-            {
-                Return(Create());
-            }
+            Return(Create());
         }
     }
 }

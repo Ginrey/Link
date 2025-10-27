@@ -1,212 +1,156 @@
-﻿using System;
+using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 
-namespace Link.Threading
+namespace Link.Threading;
+
+public sealed class ConcurentSet<T> : ISet<T>, IEnumerable<T> where T : notnull
 {
-    public class ConcurentSet<T> : ISet<T>, IEnumerable<T>
+    private readonly ConcurrentDictionary<T, byte> _dictionary = new();
+
+    public int Count => _dictionary.Count;
+
+    public bool IsReadOnly => false;
+
+    public IEnumerable<T> Items => _dictionary.Keys;
+
+    public T[] ToArray() => [.. _dictionary.Keys];
+
+    public bool Add(T item) => _dictionary.TryAdd(item, 0);
+
+    public void Clear() => _dictionary.Clear();
+
+    public bool Contains(T item) => _dictionary.ContainsKey(item);
+
+    public void CopyTo(T[] array, int arrayIndex)
     {
-        private static readonly T[] emptyData = { };
+        if (array == null)
+            throw new ArgumentNullException(nameof(array));
+        if (arrayIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(arrayIndex));
 
-        private object LockObject = new object();
-        private HashSet<T> Set;
-        private T[] safeCached;
+        var items = ToArray();
+        if (array.Length - arrayIndex < items.Length)
+            throw new ArgumentException("Array is too small");
 
-        public ConcurentSet()
+        Array.Copy(items, 0, array, arrayIndex, items.Length);
+    }
+
+    public void ExceptWith(IEnumerable<T> other)
+    {
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        foreach (var item in other)
         {
-            Set = new HashSet<T>();
-        }
-
-        public object Lock => LockObject;
-
-        public int Count
-        {
-            get
-            {
-                lock (Lock)
-                {
-                    return Set.Count;
-                }
-            }
-        }
-
-        public bool IsReadOnly => false;
-
-        public IEnumerable<T> Items
-        {
-            get
-            {
-                var items = ToArray();
-                foreach (var x in items)
-                {
-                    yield return x;
-                }
-            }
-        }
-        public IEnumerable<T> ItemsUnsafe
-        {
-            get
-            {
-                foreach (var x in Set)
-                {
-                    yield return x;
-                }
-            }
-        }
-        public T[] ToArray()
-        {
-            T[] result;
-            lock (Lock)
-            {
-                if (safeCached == null)
-                {
-                    safeCached = Set.ToArray();
-                }
-                result = safeCached;
-            }
-            return result;
-        }
-
-        public bool Add(T item)
-        {
-            lock (Lock)
-            {
-                safeCached = null;
-                return Set.Add(item);
-            }
-        }
-
-        public void Clear()
-        {
-            lock (Lock)
-            {
-                safeCached = emptyData;
-                Set.Clear();
-            }
-        }
-
-        public bool Contains(T item)
-        {
-            lock (Lock)
-            {
-                return Set.Contains(item);
-            }
-        }
-
-        public void CopyTo(T[] array, int arrayIndex)
-        {
-            var temp = ToArray();
-            Array.Copy(temp, 0, array, arrayIndex, temp.Length);
-        }
-
-        public void ExceptWith(IEnumerable<T> other)
-        {
-            lock (Lock)
-            {
-                safeCached = null;
-                Set.ExceptWith(other);
-            }
-        }
-
-        public IEnumerator<T> GetEnumerator()
-        {
-            return Items.GetEnumerator();
-        }
-
-        public void IntersectWith(IEnumerable<T> other)
-        {
-            lock (Lock)
-            {
-                safeCached = null;
-                Set.IntersectWith(other);
-            }
-        }
-
-        public bool IsProperSubsetOf(IEnumerable<T> other)
-        {
-            lock (Lock)
-            {
-                return Set.IsProperSubsetOf(other);
-            }
-        }
-
-        public bool IsProperSupersetOf(IEnumerable<T> other)
-        {
-            lock (Lock)
-            {
-                return Set.IsProperSupersetOf(other);
-            }
-        }
-
-        public bool IsSubsetOf(IEnumerable<T> other)
-        {
-            lock (Lock)
-            {
-                return Set.IsSubsetOf(other);
-            }
-        }
-
-        public bool IsSupersetOf(IEnumerable<T> other)
-        {
-            lock (Lock)
-            {
-                return Set.IsSupersetOf(other);
-            }
-        }
-
-        public bool Overlaps(IEnumerable<T> other)
-        {
-            lock (Lock)
-            {
-                return Set.Overlaps(other);
-            }
-        }
-
-        public bool Remove(T item)
-        {
-            lock (Lock)
-            {
-                safeCached = null;
-                return Set.Remove(item);
-            }
-        }
-
-        public bool SetEquals(IEnumerable<T> other)
-        {
-            lock (Lock)
-            {
-                return Set.SetEquals(other);
-            }
-        }
-
-        public void SymmetricExceptWith(IEnumerable<T> other)
-        {
-            lock (Lock)
-            {
-                safeCached = null;
-                Set.SymmetricExceptWith(other);
-            }
-        }
-
-        public void UnionWith(IEnumerable<T> other)
-        {
-            lock (Lock)
-            {
-                safeCached = null;
-                Set.UnionWith(other);
-            }
-        }
-
-        void ICollection<T>.Add(T item)
-        {
-            Add(item);
-        }
-
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            return GetEnumerator();
+            _dictionary.TryRemove(item, out _);
         }
     }
+
+    public IEnumerator<T> GetEnumerator() => _dictionary.Keys.GetEnumerator();
+
+    public void IntersectWith(IEnumerable<T> other)
+    {
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        var otherSet = new HashSet<T>(other);
+        var toRemove = _dictionary.Keys.Where(k => !otherSet.Contains(k)).ToList();
+        foreach (var item in toRemove)
+        {
+            _dictionary.TryRemove(item, out _);
+        }
+    }
+
+    public bool IsProperSubsetOf(IEnumerable<T> other)
+    {
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        var otherSet = new HashSet<T>(other);
+        return _dictionary.Keys.All(k => otherSet.Contains(k)) && otherSet.Count > _dictionary.Count;
+    }
+
+    public bool IsProperSupersetOf(IEnumerable<T> other)
+    {
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        var otherSet = new HashSet<T>(other);
+        return otherSet.All(item => _dictionary.ContainsKey(item)) && _dictionary.Count > otherSet.Count;
+    }
+
+    public bool IsSubsetOf(IEnumerable<T> other)
+    {
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        var otherSet = new HashSet<T>(other);
+        return _dictionary.Keys.All(k => otherSet.Contains(k));
+    }
+
+    public bool IsSupersetOf(IEnumerable<T> other)
+    {
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        return other.All(item => _dictionary.ContainsKey(item));
+    }
+
+    public bool Overlaps(IEnumerable<T> other)
+    {
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        return other.Any(item => _dictionary.ContainsKey(item));
+    }
+
+    public bool Remove(T item) => _dictionary.TryRemove(item, out _);
+
+    public bool SetEquals(IEnumerable<T> other)
+    {
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        var otherSet = new HashSet<T>(other);
+        return _dictionary.Count == otherSet.Count && _dictionary.Keys.All(k => otherSet.Contains(k));
+    }
+
+    public void SymmetricExceptWith(IEnumerable<T> other)
+    {
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        foreach (var item in other)
+        {
+            if (_dictionary.ContainsKey(item))
+            {
+                _dictionary.TryRemove(item, out _);
+            }
+            else
+            {
+                _dictionary.TryAdd(item, 0);
+            }
+        }
+    }
+
+    public void UnionWith(IEnumerable<T> other)
+    {
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        foreach (var item in other)
+        {
+            _dictionary.TryAdd(item, 0);
+        }
+    }
+
+    void ICollection<T>.Add(T item)
+    {
+        Add(item);
+    }
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

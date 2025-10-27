@@ -1,56 +1,61 @@
-﻿using Link.IO;
+using System;
+using Link.IO;
 
-namespace Link.Security
+namespace Link.Security;
+
+public sealed class Rc4Encryption : StreamEncoder
 {
-    public class Rc4Encryption : StreamEncoder
+    private readonly byte[] _table;
+    private byte _shift1;
+    private byte _shift2;
+
+    public Rc4Encryption(byte[] key)
     {
-        private readonly byte[] table;
-        private byte shift1;
-        private byte shift2;
+        ArgumentNullException.ThrowIfNull(key);
 
-        public Rc4Encryption(byte[] key)
+        _table = new byte[256];
+
+        for (int i = 0; i < 256; i++)
         {
-            table = new byte[256];
-
-            for (int i = 0; i < 256; i++)
-            {
-                table[i] = (byte)i;
-            }
-
-            byte shift = 0;
-
-            for (uint i = 0; i < 256; i++)
-            {
-                var a = key[i % key.Length];
-                shift += (byte)((a + table[i]) & 255);
-
-                var b = table[i];
-                table[i] = table[shift];
-                table[shift] = b;
-            }
+            _table[i] = (byte)i;
         }
-        public override void Encode(byte[] buffer, int offset, int length, DataStream outputStream)
+
+        byte shift = 0;
+
+        for (uint i = 0; i < 256; i++)
         {
-            outputStream.Resize(outputStream.Count + length);
-            var dstBuffer = outputStream.Buffer;
-            var dstOffset = outputStream.Position;
-            for (var i = 0; i < length; i++)
-            {
+            var a = key[i % key.Length];
+            shift += (byte)((a + _table[i]) & 255);
 
-                shift1++;
-                var a = table[shift1];
+            (_table[shift], _table[i]) = (_table[i], _table[shift]);
+        }
+    }
 
-                shift2 += a;
-                var b = table[shift2];
+    public override void Encode(byte[] buffer, int offset, int length, DataStream outputStream)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        ArgumentNullException.ThrowIfNull(outputStream);
 
-                table[shift2] = a;
-                table[shift1] = b;
+        outputStream.Resize(outputStream.Count + length);
+        var dstBuffer = outputStream.Buffer.AsSpan();
+        var srcBuffer = buffer.AsSpan(offset, length);
+        var dstOffset = outputStream.Position;
 
-                var c = (byte)((a + b) & 255);
-                var d = table[c];
+        for (var i = 0; i < length; i++)
+        {
+            _shift1++;
+            var a = _table[_shift1];
 
-                dstBuffer[dstOffset + i] = (byte)(buffer[i + offset] ^ d);
-            }
+            _shift2 += a;
+            var b = _table[_shift2];
+
+            _table[_shift2] = a;
+            _table[_shift1] = b;
+
+            var c = (byte)((a + b) & 255);
+            var d = _table[c];
+
+            dstBuffer[dstOffset + i] = (byte)(srcBuffer[i] ^ d);
         }
     }
 }
