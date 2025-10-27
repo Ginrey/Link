@@ -1,0 +1,11 @@
+/home/runner/work/Link/Link/link/bin/Debug/netcoreapp1.1/Link.deps.json
+/home/runner/work/Link/Link/link/bin/Debug/netcoreapp1.1/Link.dll
+/home/runner/work/Link/Link/link/bin/Debug/netcoreapp1.1/Link.pdb
+/home/runner/work/Link/Link/link/obj/Debug/netcoreapp1.1/link.csproj.AssemblyReference.cache
+/home/runner/work/Link/Link/link/obj/Debug/netcoreapp1.1/link.GeneratedMSBuildEditorConfig.editorconfig
+/home/runner/work/Link/Link/link/obj/Debug/netcoreapp1.1/link.AssemblyInfoInputs.cache
+/home/runner/work/Link/Link/link/obj/Debug/netcoreapp1.1/link.AssemblyInfo.cs
+/home/runner/work/Link/Link/link/obj/Debug/netcoreapp1.1/link.csproj.CoreCompileInputs.cache
+/home/runner/work/Link/Link/link/obj/Debug/netcoreapp1.1/link.sourcelink.json
+/home/runner/work/Link/Link/link/obj/Debug/netcoreapp1.1/Link.dll
+/home/runner/work/Link/Link/link/obj/Debug/netcoreapp1.1/Link.pdb
