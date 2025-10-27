@@ -1,38 +1,36 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Link.Threading
+namespace Link.Threading;
+
+internal sealed class TaskResultAsyncContainer<T> : IDisposable
 {
-    class TaskResultAsyncContainer<T> : IAsyncResult
+    private readonly TaskCompletionSource<T> _tcs = new();
+    private bool _disposed;
+
+    public Task<T> ResultTask => _tcs.Task;
+
+    public void SetResult(T result)
     {
-        public ManualResetEventSlim ResetEvent { get; } = new ManualResetEventSlim(false);
-        public T Result { get; private set; }
-        public Task<T> ResultTask { get; private set; }
+        _tcs.TrySetResult(result);
+    }
 
-        public TaskResultAsyncContainer()
+    public void SetException(Exception ex)
+    {
+        _tcs.TrySetException(ex);
+    }
+
+    public void SetCanceled()
+    {
+        _tcs.TrySetCanceled();
+    }
+
+    public void Dispose()
+    {
+        if (!_disposed)
         {
-            ResultTask = Task.Factory.FromAsync(this, ResultMethod);
+            _disposed = true;
         }
-
-        public void SetResult(T result)
-        {
-            Result = result;
-            ResetEvent.Set();
-        }
-        private T ResultMethod(IAsyncResult e)
-        {
-            return Result;
-        }
-
-        public object AsyncState => null;
-
-        public WaitHandle AsyncWaitHandle => ResetEvent.WaitHandle;
-
-        public bool CompletedSynchronously => false;
-
-        public bool IsCompleted => ResetEvent.IsSet;
     }
 }
